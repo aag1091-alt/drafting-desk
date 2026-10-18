@@ -237,16 +237,17 @@ function renderEditor(post) {
   const title = h("input", { class: "post-title-input", "aria-label": "Post title", value: post.title,
     oninput: (e) => { post.title = e.target.value; document.title = `${post.title} · Drafting Desk`; scheduleSave(); } });
 
-  const status = h("select", { class: "status-select", "aria-label": "Status", onchange: (e) => { post.status = e.target.value; scheduleSave(); } },
+  const status = h("select", { class: "status-select", "aria-label": "Status", title: "Where this post is at", onchange: (e) => { post.status = e.target.value; scheduleSave(); } },
     store.STATUSES.map((st) => h("option", { value: st, selected: post.status === st }, st)));
 
   const ta = h("textarea", { id: "draft", class: "draft", spellcheck: "true", "aria-label": "Draft",
     placeholder: "Start writing. Use # for headings if you like. Everything you type here is yours; the assistant only suggests.",
-    oninput: onDraftInput, onkeydown: onDraftKey, onselect: rememberSel, onkeyup: rememberSel, onmouseup: rememberSel, onfocus: rememberSel });
+    oninput: (e) => { hideSelBar(); onDraftInput(e); }, onkeydown: onDraftKey, onblur: () => setTimeout(hideSelBar, 150), onselect: rememberSel, onkeyup: rememberSel, onmouseup: rememberSel, onfocus: rememberSel });
   ta.value = post.body;
 
-  const tool = (label, kbd, fn, title) => h("button", { class: "tool", title: `${title} (${MOD}+Alt+${kbd})`, onmousedown: (e) => e.preventDefault(), onclick: fn },
-    label, h("kbd", {}, kbd));
+  const ready = isReady();
+  const tool = (label, kbd, fn, title) => h("button", { class: "tool" + (ready ? "" : " needs-model"),
+    title: ready ? `${title} (${MOD}+Alt+${kbd})` : "Connect a model to use the assistant", onmousedown: (e) => e.preventDefault(), onclick: fn }, label);
 
   app.replaceChildren(
     h("header", { class: "topbar" },
@@ -254,7 +255,7 @@ function renderEditor(post) {
       h("div", { class: "topbar-actions" },
         h("button", { class: "ghost", id: "focusBtn", onclick: toggleFocus, title: "Hide side panels" }, "Focus"),
         h("button", { class: "ghost", onclick: openVersions }, "Versions"),
-        h("button", { class: "ghost", onclick: openVoice }, "Voice"),
+        h("button", { class: "ghost", onclick: openVoice, title: "Describe how you write, so suggestions sound like you" }, "Your voice"),
         h("button", { class: "ghost", onclick: openExport }, "Export"),
         modelButton())),
     h("div", { class: "editor-head" },
@@ -271,16 +272,17 @@ function renderEditor(post) {
         h("div", { class: "toolbar", role: "toolbar", "aria-label": "Assistant tools" },
           h("button", { class: "ghost small notes-toggle", onclick: toggleNotes, "aria-expanded": String(!!s.notesOpen) }, s.notesOpen ? "Hide notes" : `Notes (${post.notes.length})`),
           h("div", { class: "tools" },
-            tool("Fix grammar", "1", (e) => (e.shiftKey ? runGrammarAll() : runGrammar()), "Correct spelling and grammar in the selection or this paragraph. Shift-click (or add Shift) for the whole draft"),
-            tool("Clarify", "2", () => runClarify(), "Show what's unclear in the selection or this sentence, with options"),
-            tool("Prompt me", "3", () => runPromptMe(), "Questions to help you think of what to say next"),
-            tool("Review", "4", () => runReview(), "Editor's margin notes on the whole draft")),
+            tool("Fix grammar", "1", (e) => (e.shiftKey ? runGrammarAll() : runGrammar()), "Correct spelling and grammar in the selection or this paragraph. Shift-click for the whole draft"),
+            tool("Make it clearer", "2", () => runClarify(), "See what a reader might trip on in this sentence, with clearer wordings to choose from"),
+            tool("I'm stuck", "3", () => runPromptMe(), "Questions that help you think of what to say next"),
+            tool("Review draft", "4", () => runReview(), "An editor's notes on the whole draft, highlighted in your text")),
           h("select", { id: "contents", class: "contents", "aria-label": "Jump to section", hidden: true, onchange: (e) => {
             const i = Number(e.target.value); e.target.selectedIndex = 0;
             if (i >= 0) { const line = current.post.body.indexOf("\n", i); selectInDraft(i, line < 0 ? current.post.body.length : line); }
           } }),
           h("span", { class: "scope", id: "scope" })),
-        h("div", { class: "draft-wrap" }, h("div", { class: "draft backdrop", id: "backdrop", "aria-hidden": "true" }), ta)),
+        guideStrip(),
+        h("div", { class: "draft-wrap" }, h("div", { class: "draft backdrop", id: "backdrop", "aria-hidden": "true" }), ta, selectionBar())),
       assistantPanel()));
   autogrow();
   updateStats();
@@ -288,6 +290,56 @@ function renderEditor(post) {
   updateContents();
   renderCards();
   if (!post.body) ta.focus();
+}
+
+function guideStrip() {
+  const s = store.getSettings();
+  if (s.guideDone) return null;
+  const el = h("ol", { class: "guide", id: "guide" },
+    h("li", {}, h("strong", {}, "Write"), " in your own words. Rough is fine; nothing is sent anywhere while you type."),
+    h("li", {}, h("strong", {}, "Stuck?"), " Press ", h("em", {}, "I'm stuck"), " for questions that get you going."),
+    h("li", {}, h("strong", {}, "Select a sentence"), " to fix its grammar or make it clearer. You approve every change."),
+    h("li", {}, h("strong", {}, "Finished a draft?"), " ", h("em", {}, "Review draft"), " gives you an editor's notes, highlighted in your text."),
+    h("button", { class: "link-btn guide-close", onclick: () => { const st = store.getSettings(); st.guideDone = true; store.saveSettings(st); el.remove(); autogrow(); } }, "Got it"));
+  return el;
+}
+
+// ---------- floating tools next to a selection ----------
+function selectionBar() {
+  const stop = (e) => e.preventDefault();
+  return h("div", { class: "sel-bar", id: "selBar", hidden: true, role: "toolbar", "aria-label": "Help with the selected text" },
+    h("button", { onmousedown: stop, onclick: () => { hideSelBar(); runGrammar(); } }, "Fix grammar"),
+    h("button", { onmousedown: stop, onclick: () => { hideSelBar(); runClarify(); } }, "Make it clearer"),
+    h("button", { onmousedown: stop, onclick: () => { hideSelBar(); askAboutSelection(); } }, "Ask about this"));
+}
+let dismissedSel = "";
+function hideSelBar() {
+  const b = $("#selBar");
+  if (b) b.hidden = true;
+  dismissedSel = `${lastSel.start}:${lastSel.end}`;
+}
+function updateSelBar() {
+  const bar = $("#selBar"), ta = draft();
+  if (!bar || !ta) return;
+  const { start, end } = lastSel;
+  const text = ta.value.slice(start, end);
+  if (end - start < 3 || !text.trim() || document.activeElement !== ta || !isReady() || dismissedSel === `${start}:${end}`) { bar.hidden = true; return; }
+  const pos = caretPoint(ta, start);
+  bar.hidden = false;
+  const w = bar.offsetWidth;
+  const left = Math.max(8, Math.min(pos.left - 12, ta.clientWidth - w - 8));
+  const top = pos.top - bar.offsetHeight - 8;
+  bar.style.left = left + "px";
+  bar.style.top = (top < 4 ? caretPoint(ta, end).top + pos.lh + 6 : top) + "px";
+}
+function askAboutSelection() {
+  const { start, end } = lastSel;
+  const quote = current.post.body.slice(start, end).trim();
+  const box = $("#askBox");
+  box.value = `About "${clip(quote, 300)}": `;
+  box.focus();
+  box.selectionStart = box.selectionEnd = box.value.length;
+  box.scrollIntoView({ block: "nearest", behavior: "smooth" });
 }
 
 function onDraftInput(e) {
@@ -335,6 +387,7 @@ function rememberSel() {
   if (!ta) return;
   lastSel = { start: ta.selectionStart, end: ta.selectionEnd };
   updateScope();
+  updateSelBar();
 }
 function autogrow(full = true) {
   const ta = draft();
@@ -367,6 +420,21 @@ function keepCaretVisible() {
     if (y + lh > bottomRoom) window.scrollBy(0, y + lh - bottomRoom);
     else if (y < 64) window.scrollBy(0, y - 64);
   });
+}
+function caretPoint(ta, index) {
+  const cs = getComputedStyle(ta);
+  const mirror = h("div", { class: "draft mirror" });
+  mirror.style.width = ta.clientWidth + "px";
+  mirror.style.font = cs.font;
+  mirror.style.padding = cs.padding;
+  mirror.style.lineHeight = cs.lineHeight;
+  mirror.textContent = ta.value.slice(0, index);
+  const mark = h("span", {}, "\u200b");
+  mirror.append(mark);
+  document.body.append(mirror);
+  const p = { top: mark.offsetTop, left: mark.offsetLeft, lh: parseFloat(cs.lineHeight) || 30 };
+  mirror.remove();
+  return p;
 }
 function caretOffset(ta, index) {
   const cs = getComputedStyle(ta);
@@ -526,7 +594,7 @@ function selectInDraft(start, end) {
 function notesPanel() {
   return h("aside", { class: "notes-col", id: "notesCol", "aria-label": "Notes and research" },
     h("div", { class: "panel-head" }, h("h2", {}, "Notes & research"),
-      h("button", { class: "ghost small", onclick: runOutline, title: "Suggest an outline from your notes" }, "Outline from notes")),
+      h("button", { class: "ghost small", onclick: runOutline, title: "Suggest section headings built only from your notes" }, "Suggest outline")),
     h("div", { class: "note-add" },
       h("textarea", { id: "newNote", rows: "3", placeholder: `Jot a thought, a fact, a line you might use… (${MOD}+Enter to add)`,
         onkeydown: (e) => { if ((isMac ? e.metaKey : e.ctrlKey) && e.key === "Enter") { e.preventDefault(); addNoteFromBox(); } } }),
@@ -662,10 +730,10 @@ function assistIntro() {
     h("p", {}, "You write; I suggest. Nothing changes in your draft unless you accept it."),
     h("dl", {},
       h("dt", {}, "Fix grammar"), h("dd", {}, "Spelling, grammar and punctuation only. You see every change before accepting."),
-      h("dt", {}, "Clarify"), h("dd", {}, "Points out what a reader might trip on and offers wordings close to yours."),
-      h("dt", {}, "Prompt me"), h("dd", {}, "Questions to get you unstuck. You answer them in your own words."),
-      h("dt", {}, "Review"), h("dd", {}, "An editor's margin notes on the whole draft. No rewrites.")),
-    h("p", { class: "hint" }, `Select text first to target it; otherwise tools act on the paragraph or sentence at your cursor. Shortcuts: ${MOD}+Alt+1 to 4.`),
+      h("dt", {}, "Make it clearer"), h("dd", {}, "What a reader might trip on, with wordings close to yours to pick from."),
+      h("dt", {}, "I'm stuck"), h("dd", {}, "Questions that get you thinking. You answer them in your own words."),
+      h("dt", {}, "Review draft"), h("dd", {}, "An editor's notes on the whole draft, highlighted in your text.")),
+    h("p", { class: "hint" }, `Tip: select some text and the tools appear right next to it. Shortcuts: ${MOD}+Alt+1 to 4.`),
     isReady() ? null : h("button", { class: "primary small", onclick: openSettings }, "Connect a model"));
 }
 function renderCards() {
@@ -705,7 +773,7 @@ function requireModel() {
   toast("Connect a model to use the assistant.", { action: { label: "Connect", run: openSettings } });
   return false;
 }
-const KIND_LABEL = { grammar: "Grammar", clarify: "Clarify", prompt: "Prompt me", review: "Review", outline: "Outline", ask: "Ask" };
+const KIND_LABEL = { grammar: "Grammar", clarify: "Make it clearer", prompt: "I'm stuck", review: "Review", outline: "Outline", ask: "Ask" };
 
 function cardView(c) {
   const head = h("div", { class: "card-head" },

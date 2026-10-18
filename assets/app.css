@@ -124,7 +124,7 @@ body.focus .topbar-actions > :not(#focusBtn) { display: none; }
 .tools { display: flex; flex-wrap: wrap; gap: 6px; }
 .tool { display: inline-flex; align-items: center; gap: 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 14px; }
 .tool:hover { border-color: var(--accent); color: var(--accent); }
-.tool kbd { font: 11px var(--mono); color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+.tool.needs-model { color: var(--muted); border-style: dashed; }
 .scope { color: var(--muted); font-size: 12.5px; margin-left: auto; }
 .draft { width: 100%; min-height: 60vh; resize: none; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 28px clamp(18px, 4vw, 48px); font: 19px/1.75 var(--serif); color: var(--fg); box-shadow: var(--shadow); }
 .draft:focus { outline: none; border-color: var(--accent); }
@@ -255,7 +255,7 @@ dialog:has(.narrow) { width: min(420px, calc(100vw - 32px)); }
 .capture input { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); padding: 8px 10px; }
 
 .ask { display: flex; gap: 6px; align-items: flex-end; }
-.ask textarea { font: 14px/1.45 var(--sans); padding: 7px 9px; resize: none; }
+.ask textarea { flex: 1; min-width: 0; font: 14px/1.45 var(--sans); padding: 7px 9px; resize: none; }
 .asked { margin: 0; font-weight: 600; }
 .answer { font-size: 14px; line-height: 1.55; }
 .answer p, .answer ul, .answer ol { margin: 0 0 0.6em; }
@@ -269,3 +269,10 @@ dialog:has(.narrow) { width: min(420px, calc(100vw - 32px)); }
 .backdrop mark { color: transparent; background: transparent; border-radius: 3px; }
 .backdrop mark.hl-review { background: color-mix(in srgb, var(--warn) 22%, transparent); }
 .backdrop mark.hl-suggest { box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--accent) 70%, transparent); }
+
+.guide { margin: 0; padding: 12px 16px 12px 34px; background: var(--accent-soft); border-radius: 10px; display: grid; gap: 4px; font-size: 14px; position: relative; }
+.guide li { padding-right: 60px; }
+.guide-close { position: absolute; top: 10px; right: 14px; font-weight: 600; }
+.sel-bar { position: absolute; z-index: 5; display: flex; gap: 2px; padding: 3px; background: var(--fg); border-radius: 8px; box-shadow: 0 6px 20px rgb(0 0 0 / 0.25); }
+.sel-bar button { background: transparent; border: 0; color: var(--bg); font-size: 13px; padding: 5px 10px; border-radius: 5px; cursor: pointer; white-space: nowrap; }
+.sel-bar button:hover, .sel-bar button:focus-visible { background: color-mix(in srgb, var(--bg) 18%, transparent); }

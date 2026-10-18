@@ -10,12 +10,13 @@ You type the draft. The assistant suggests, and nothing changes in your draft un
 
 | Tool | What it does | Shortcut |
 | --- | --- | --- |
-| Fix grammar | Spelling, grammar and punctuation only, shown as a word-level diff. | Cmd/Ctrl+Alt+1 |
-| Clarify | Says what a reader might trip on and offers two or three wordings close to yours. | Cmd/Ctrl+Alt+2 |
-| Prompt me | Questions about what to say next, based on your draft and notes. You answer in your own words. | Cmd/Ctrl+Alt+3 |
-| Review | An editor's margin notes on the whole draft, each tied to a quote you can jump to. No rewrites. | Cmd/Ctrl+Alt+4 |
+| Fix grammar | Spelling, grammar and punctuation only, shown as a word-level diff. Shift-click checks the whole draft. | Cmd/Ctrl+Alt+1 |
+| Make it clearer | Says what a reader might trip on and offers two or three wordings close to yours. | Cmd/Ctrl+Alt+2 |
+| I'm stuck | Questions about what to say next, based on your draft and notes. You answer in your own words. | Cmd/Ctrl+Alt+3 |
+| Review draft | An editor's margin notes on the whole draft, highlighted in your text. No rewrites. | Cmd/Ctrl+Alt+4 |
+| Ask | Ask anything about your draft ("does my intro earn the claim?"). It answers like an editor and won't write paragraphs for you. | Enter in the Ask box |
 
-Tools act on your selection, or on the paragraph (sentence, for Clarify) your cursor is in.
+Select some text and the tools appear right next to it; otherwise they act on the paragraph (sentence, for Make it clearer) your cursor is in. Cmd/Ctrl+B, I and K add bold, italic and links. Assistant results stay saved with the post.
 
 Beside the draft you get a **Notes & research** panel for notes, sources with links, and saved questions, with search, "Insert" into the draft, and "Outline from notes". **Versions** saves snapshots: automatically the first time you edit each day and before any restore, plus whenever you click Save. A **"% your words"** counter shows roughly how much of the draft came from accepted suggestions rather than your own typing. **Focus** hides everything but the draft. **Export** previews the post and downloads Markdown with optional Jekyll front matter.
 
