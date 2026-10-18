@@ -224,7 +224,25 @@ async function failure(res, label) {
  * @param {{system?: string, prompt: string, onText?: (full: string) => void, signal?: AbortSignal, maxTokens?: number}} opts
  * @returns {Promise<string>} the full reply
  */
-export async function complete({ system, prompt, onText, signal, maxTokens = 2000, temperature }) {
+const noTemperature = new Set(); // models that refused a temperature setting this session
+
+export async function complete(opts) {
+  const settings = getSettings();
+  const modelKey = settings.provider + ":" + settings.models[settings.provider];
+  const temp = noTemperature.has(modelKey) ? undefined : opts.temperature;
+  try {
+    return await completeOnce({ ...opts, temperature: temp });
+  } catch (e) {
+    // Some newer models reject sampling settings; retry once without.
+    if (temp != null && /temperature/i.test(e.message) && !e.cancelled && !(e.partial || "").length) {
+      noTemperature.add(modelKey);
+      return completeOnce({ ...opts, temperature: undefined });
+    }
+    throw e;
+  }
+}
+
+async function completeOnce({ system, prompt, onText, signal, maxTokens = 2000, temperature }) {
   const settings = getSettings();
   const p = settings.provider;
   const model = settings.models[p];
