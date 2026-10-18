@@ -4,6 +4,7 @@ import { getSecret, setSecret, getSettings } from "./store.js?v=__V__";
 export const PROVIDERS = {
   openrouter: {
     label: "OpenRouter",
+    tag: "Easiest",
     blurb: "Sign in once and use Claude, GPT, Gemini, Llama, Qwen and more. No key to copy.",
     auth: "oauth",
     keyHelp: "https://openrouter.ai/settings/keys",
@@ -28,6 +29,7 @@ export const PROVIDERS = {
   },
   ollama: {
     label: "Ollama (local)",
+    tag: "Free & private",
     blurb: "A model running on your own machine. Nothing leaves your network.",
     auth: "url",
   },

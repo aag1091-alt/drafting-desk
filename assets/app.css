@@ -276,3 +276,7 @@ dialog:has(.narrow) { width: min(420px, calc(100vw - 32px)); }
 .sel-bar { position: absolute; z-index: 5; display: flex; gap: 2px; padding: 3px; background: var(--fg); border-radius: 8px; box-shadow: 0 6px 20px rgb(0 0 0 / 0.25); }
 .sel-bar button { background: transparent; border: 0; color: var(--bg); font-size: 13px; padding: 5px 10px; border-radius: 5px; cursor: pointer; white-space: nowrap; }
 .sel-bar button:hover, .sel-bar button:focus-visible { background: color-mix(in srgb, var(--bg) 18%, transparent); }
+
+.pill.tag { color: var(--accent); }
+.post-filters { margin-top: 10px; }
+.post-filters .note-search { flex: 1 1 200px; padding: 6px 10px; }

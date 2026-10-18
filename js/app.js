@@ -97,6 +97,11 @@ function modelButton() {
 }
 
 // ---------- home ----------
+let homeQuery = "", homeStatus = "All";
+function visiblePosts(posts) {
+  const q = homeQuery.trim().toLowerCase();
+  return posts.filter((p) => (homeStatus === "All" || p.status === homeStatus) && (!q || `${p.title} ${p.body}`.toLowerCase().includes(q)));
+}
 function renderHome() {
   document.title = "Drafting Desk";
   const posts = store.listPosts();
@@ -135,8 +140,13 @@ function renderHome() {
           h("div", { class: "row" },
             h("button", { class: "ghost small", onclick: () => $("#importFile").click() }, "Import"),
             posts.length ? h("button", { class: "ghost small", onclick: exportBackup }, "Back up all") : null)),
+        posts.length > 4 ? h("div", { class: "row post-filters" },
+          h("input", { type: "search", class: "note-search", placeholder: "Search posts", value: homeQuery, "aria-label": "Search posts",
+            oninput: (e) => { homeQuery = e.target.value; renderHome(); setTimeout(() => { const i = document.querySelector(".post-filters input"); if (i) { i.focus(); i.selectionStart = i.selectionEnd = i.value.length; } }); } }),
+          ["All", ...store.STATUSES].map((st) => h("button", { class: "filter" + (homeStatus === st ? " on" : ""), onclick: () => { homeStatus = st; renderHome(); } }, st))) : null,
+        posts.length && !visiblePosts(posts).length ? h("p", { class: "hint" }, "No posts match.") : null,
         posts.length
-          ? h("ul", { class: "post-list" }, posts.map((p) => h("li", {},
+          ? h("ul", { class: "post-list" }, visiblePosts(posts).map((p) => h("li", {},
               h("a", { href: `#/p/${p.id}`, class: "post-link" },
                 h("span", { class: "post-title" }, p.title || "Untitled post"),
                 h("span", { class: "post-meta" },
@@ -782,7 +792,7 @@ function cardView(c) {
     c.at && Date.now() - c.at > 3600e3 ? h("span", { class: "card-scope" }, "· " + timeAgo(c.at)) : null,
     h("button", { class: "icon-btn small", "aria-label": "Dismiss", title: "Dismiss", onclick: () => { c.ctl?.abort(); dropCard(c); } }, "×"));
   const el = h("article", { class: "card " + c.kind + (c.done ? " done" : ""), "data-card": c.id }, head);
-  if (c.original && c.kind !== "review") {
+  if (c.original && c.kind !== "review" && c.kind !== "grammar") {
     el.append(h("button", { class: "quote", title: "Show in draft", onclick: () => { const r = locate(c); if (r) selectInDraft(r.start, r.end); else toast("That text has changed in your draft."); } }, clip(c.original, 160)));
   }
   if (c.pending && c.kind === "ask" && c.partial) {
@@ -814,7 +824,8 @@ function cardView(c) {
     el.append(h("p", { class: "diff" }, parts.map((p) => p.type === "same" ? p.text : h(p.type === "add" ? "ins" : "del", {}, p.text))));
     if (changeRatio(c.original, c.result) > 0.25) el.append(h("p", { class: "status err" }, "This changes more than grammar usually would. Check it's still what you meant before accepting."));
     el.append(h("div", { class: "row between" },
-      h("span", { class: "hint" }, `${changeCount(parts)} change${changeCount(parts) === 1 ? "" : "s"}`),
+      h("span", { class: "hint" }, `${changeCount(parts)} change${changeCount(parts) === 1 ? "" : "s"} · `,
+        h("button", { class: "link-btn", onclick: () => { const r = locate(c); if (r) selectInDraft(r.start, r.end); else toast("That text has changed in your draft."); } }, "show in draft")),
       c.done ? h("span", { class: "ok-text" }, "Accepted") : h("div", { class: "row" },
         h("button", { class: "ghost small", onclick: () => dropCard(c) }, "Dismiss"),
         h("button", { class: "primary small", onclick: () => acceptText(c, c.result) }, "Accept"))));
@@ -1116,10 +1127,14 @@ function renderSettings() {
       return h("label", { class: "provider" + (s.provider === id ? " on" : "") },
         h("input", { type: "radio", name: "provider", value: id, checked: s.provider === id,
           onchange: () => { const st = store.getSettings(); st.provider = id; store.saveSettings(st); renderSettings(); } }),
-        h("span", { class: "provider-name" }, p.label, connected ? h("span", { class: "pill" }, "key saved") : null),
+        h("span", { class: "provider-name" }, p.label, p.tag ? h("span", { class: "pill tag" }, p.tag) : null, connected ? h("span", { class: "pill" }, "connected") : null),
         h("span", { class: "provider-blurb" }, p.blurb));
     }));
   $("#rememberKeys").checked = s.rememberKeys;
+  const note = $("#costNote");
+  if (note) note.textContent = s.provider === "ollama" || s.provider === "custom"
+    ? "Runs on your own hardware: no per-use cost."
+    : "You pay the provider per use. A writing session with these tools typically costs a few cents.";
   renderProviderConfig();
 }
 
@@ -1159,7 +1174,7 @@ async function loadModels(input, dl, btn, quiet = false) {
   try {
     const ids = await listModels();
     dl.replaceChildren(...ids.map((m) => h("option", { value: m })));
-    btn.textContent = `${ids.length} models`;
+    btn.textContent = `${ids.length} available`;
     // If the saved model isn't offered, pick a sensible one.
     if (ids.length && !ids.includes(input.value)) {
       const pick = ids.find((m) => /sonnet/i.test(m)) || ids.find((m) => /instruct|chat|qwen|llama|gpt|gemini/i.test(m)) || ids[0];
