@@ -2,7 +2,7 @@ import * as store from "./store.js?v=__V__";
 import { PROVIDERS, startOpenRouterLogin, finishOpenRouterLogin, isReady, listModels, complete, completeJSON } from "./providers.js?v=__V__";
 import * as P from "./prompts.js?v=__V__";
 import { renderMarkdown, postToMarkdown, slugify, wordCount } from "./markdown.js?v=__V__";
-import { wordDiff, addedChars, changeCount } from "./diff.js?v=__V__";
+import { wordDiff, addedChars, changeCount, paraDiff } from "./diff.js?v=__V__";
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const app = $("#app");
@@ -1065,6 +1065,7 @@ function renderVersions() {
     h("div", { class: "version-meta" }, h("strong", {}, s.label || "Saved version"), h("span", { class: "hint" }, `${stamp(s.at)} · ${wordCount(s.body).toLocaleString()} words`)),
     h("p", { class: "version-peek" }, clip(s.body.replace(/\s+/g, " "), 180)),
     h("div", { class: "row" },
+      h("button", { class: "ghost small", onclick: (e) => toggleCompare(e.target, s) }, "Compare with now"),
       h("button", { class: "ghost small", onclick: () => copyText(s.body, "Version copied") }, "Copy text"),
       h("button", { class: "ghost small", onclick: async () => {
         if (!(await confirmAction("Replace the current draft with this version? The current draft is saved as a version first.", "Restore"))) { $("#versionsDlg").showModal(); return; }
@@ -1085,6 +1086,27 @@ $("#saveVersion").addEventListener("click", () => {
   toast("Version saved");
 });
 $("#versionsClose").addEventListener("click", () => $("#versionsDlg").close());
+
+function toggleCompare(btn, snap) {
+  const li = btn.closest("li");
+  const open = li.querySelector(".compare");
+  if (open) { open.remove(); btn.textContent = "Compare with now"; return; }
+  btn.textContent = "Hide comparison";
+  const parts = paraDiff(snap.body, current.post.body);
+  const view = h("div", { class: "compare" });
+  if (parts.every((p) => p.type === "same")) view.append(h("p", { class: "ok-text" }, "Identical to your current draft."));
+  let run = 0;
+  const flush = () => { if (run) { view.append(h("p", { class: "folded" }, `${run} unchanged paragraph${run === 1 ? "" : "s"}`)); run = 0; } };
+  for (const p of parts) {
+    if (p.type === "same") { run++; continue; }
+    flush();
+    if (p.type === "edit") view.append(h("p", { class: "diff" }, p.parts.map((w) => w.type === "same" ? w.text : h(w.type === "add" ? "ins" : "del", {}, w.text))));
+    else view.append(h("p", { class: "diff whole-" + p.type }, h(p.type === "add" ? "ins" : "del", {}, p.text)));
+  }
+  flush();
+  view.prepend(h("p", { class: "hint" }, h("del", {}, "struck"), " = only in this version, ", h("ins", {}, "highlighted"), " = added since."));
+  li.append(view);
+}
 
 // ---------- voice ----------
 function openVoice() {
