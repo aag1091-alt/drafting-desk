@@ -39,8 +39,16 @@ export function addedChars(a, b) {
   return wordDiff(a, b).filter((p) => p.type === "add").reduce((n, p) => n + p.text.replace(/\s+/g, "").length, 0);
 }
 
+/** Corrections, counting a deletion followed by its replacement as one. */
 export function changeCount(parts) {
-  return parts.filter((p) => p.type !== "same" && p.text.trim()).length;
+  let n = 0;
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i];
+    if (p.type === "same" || !p.text.trim()) continue;
+    n++;
+    if (p.type === "del" && parts[i + 1]?.type === "add") i++;
+  }
+  return n;
 }
 
 /** Paragraph-level diff, with word diffs inside paragraphs that changed. */

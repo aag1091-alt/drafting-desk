@@ -31,7 +31,7 @@ function toast(msg, { error = false, action = null, ms } = {}) {
   btn.hidden = !action;
   if (action) { btn.textContent = action.label; btn.onclick = () => { action.run(); t.className = ""; }; }
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (t.className = ""), ms || (action ? 7000 : error ? 6000 : 2500));
+  toastTimer = setTimeout(() => (t.className = ""), ms || (action ? 6000 : error ? 6000 : 2500));
 }
 function timeAgo(ms) {
   const s = (Date.now() - ms) / 1000;
@@ -72,6 +72,7 @@ function flushSave() {
 }
 function route() {
   flushSave();
+  const t = $("#toast"); if (t) t.className = "";
   const m = location.hash.match(/^#\/p\/([0-9a-f]+)/);
   if (m) {
     const post = store.getPost(m[1]);
@@ -151,7 +152,7 @@ function renderHome() {
                 h("span", { class: "post-title" }, p.title || "Untitled post"),
                 h("span", { class: "post-meta" },
                   h("span", { class: "chip status-" + p.status.toLowerCase() }, p.status),
-                  `${wordCount(p.body).toLocaleString()} words · ${p.notes.length} notes · ${timeAgo(p.updated)}`)),
+                  `${wordCount(p.body).toLocaleString()} words · ${p.notes.length} note${p.notes.length === 1 ? "" : "s"} · ${timeAgo(p.updated)}`)),
               h("button", { class: "icon-btn", "aria-label": `Delete ${p.title}`, title: "Delete",
                 onclick: async () => { if (await confirmAction(`Delete "${p.title}" and all its notes and versions? This can't be undone.`)) { store.deletePost(p.id); renderHome(); } } }, "×"))))
           : h("p", { class: "hint" }, "Start a new post, or open the example to see how it works."))));
@@ -263,7 +264,9 @@ function renderEditor(post) {
 
   app.replaceChildren(
     h("header", { class: "topbar" },
-      h("a", { class: "brand", href: "#/", title: "All posts" }, h("span", { class: "brand-mark", "aria-hidden": "true" }), h("span", { class: "brand-text" }, "Drafting Desk")),
+      h("div", { class: "row nowrap" },
+        h("a", { class: "brand", href: "#/", title: "All posts" }, h("span", { class: "brand-mark", "aria-hidden": "true" }), h("span", { class: "brand-text" }, "Drafting Desk")),
+        h("a", { class: "back-link", href: "#/" }, "← All posts")),
       h("div", { class: "topbar-actions" },
         h("button", { class: "ghost", id: "focusBtn", onclick: toggleFocus, title: "Hide side panels" }, "Focus"),
         h("button", { class: "ghost", onclick: openVersions }, "Versions"),
@@ -279,7 +282,7 @@ function renderEditor(post) {
         h("label", { class: "goal", title: "Target length in words (optional)" }, "Goal",
           h("input", { type: "number", min: "0", step: "100", inputmode: "numeric", value: post.goal || "", placeholder: "—", "aria-label": "Word goal",
             oninput: (e) => { post.goal = Math.max(0, Number(e.target.value) || 0); updateStats(); scheduleSave(); } })), h("span", { id: "authorship", title: "Roughly how much of the draft is your own wording. Accepted rewordings and outline headings count against it; grammar fixes don't." }),
-        h("button", { class: "link-btn small-text", onclick: runTitles, title: "Title options built from phrases in your draft" }, "Title ideas"),
+        h("button", { class: "ghost small", onclick: runTitles, title: "Title options built from phrases in your draft" }, "Title ideas"),
         h("span", { id: "saveState", class: "save-state" }, "Saved"))),
     h("div", { class: "workspace" + (s.notesOpen ? "" : " notes-closed"), id: "workspace" },
       notesPanel(),
@@ -476,6 +479,28 @@ function caretOffset(ta, index) {
 }
 window.addEventListener("resize", autogrow);
 
+/** Find a quoted passage even if the model changed quotes, spacing or case slightly. */
+function findQuote(body, quote) {
+  if (!quote) return null;
+  let i = body.indexOf(quote);
+  if (i >= 0) return { start: i, end: i + quote.length };
+  const norm = (t) => t.replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/[–—]/g, "-").replace(/\s+/g, " ").toLowerCase();
+  // map normalized positions back to the original
+  const map = [];
+  let nb = "";
+  for (let k = 0; k < body.length; k++) {
+    const ch = norm(body[k]);
+    if (ch === " " && nb.endsWith(" ")) continue;
+    nb += ch; map.push(k);
+  }
+  const nq = norm(quote).trim();
+  i = nb.indexOf(nq);
+  if (i >= 0) return { start: map[i], end: map[i + nq.length - 1] + 1 };
+  // last resort: the first few words
+  const head = nq.split(" ").slice(0, 6).join(" ");
+  if (head.length >= 20) { i = nb.indexOf(head); if (i >= 0) return { start: map[i], end: map[i + head.length - 1] + 1 }; }
+  return null;
+}
 let hlFrame = 0;
 /** Mirror the draft behind the textarea and mark passages the assistant has notes on. */
 function updateHighlights() {
@@ -489,8 +514,8 @@ function updateHighlights() {
       if (c.pending || c.error) continue;
       if (c.kind === "review") (c.result || []).forEach((r, i) => {
         if (c.checked?.[i]) return;
-        const at = text.indexOf(r.quote);
-        if (at >= 0) ranges.push({ start: at, end: at + r.quote.length, cls: "hl-review" });
+        const at = findQuote(text, r.quote);
+        if (at) ranges.push({ ...at, cls: "hl-review" });
       });
       if ((c.kind === "grammar" || c.kind === "clarify") && !c.done && c.original && c.result !== c.original) {
         const r = locate(c);
@@ -629,7 +654,9 @@ function notesPanel() {
         h("textarea", { id: "srcText", rows: "4", placeholder: "Key facts in your own words, or paste an excerpt and summarize it" }),
         h("div", { class: "row between" },
           h("button", { class: "ghost small", id: "srcSummarize", onclick: summarizeSource, title: "Turn a pasted excerpt into short factual bullets" }, "Summarize excerpt"),
-          h("button", { class: "primary small", onclick: addSource }, "Save source")))),
+          h("div", { class: "row" },
+            h("button", { class: "ghost small", onclick: () => { $("#sourceForm").hidden = true; } }, "Cancel"),
+            h("button", { class: "primary small", onclick: addSource }, "Save source"))))),
     h("div", { class: "note-filters", role: "group", "aria-label": "Filter notes" },
       ["all", "note", "source", "question"].map((k) => h("button", { class: "filter" + (noteFilter === k ? " on" : ""), "aria-pressed": String(noteFilter === k),
         onclick: () => { noteFilter = k; renderNotes(); } }, { all: "All", note: "Notes", source: "Sources", question: "Questions" }[k])),
@@ -741,7 +768,7 @@ function assistantPanel() {
   return h("aside", { class: "assist-col", "aria-label": "Assistant" },
     h("div", { class: "panel-head" }, h("h2", {}, "Assistant"),
       h("button", { class: "ghost small", id: "clearCards", onclick: () => { cards = []; renderCards(); persistCards(); } }, "Clear")),
-    h("form", { class: "ask", onsubmit: (e) => { e.preventDefault(); runAsk(); } },
+    h("form", { class: "ask-form", onsubmit: (e) => { e.preventDefault(); runAsk(); } },
       h("textarea", { id: "askBox", rows: "2", placeholder: "Ask about your draft… e.g. Does my intro earn the main claim?", "aria-label": "Ask the assistant about your draft",
         onkeydown: (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); runAsk(); } } }),
       h("button", { class: "ghost small" }, "Ask")),
@@ -836,8 +863,9 @@ function cardView(c) {
     el.append(h("p", { class: "diff" }, parts.map((p) => p.type === "same" ? p.text : h(p.type === "add" ? "ins" : "del", {}, p.text))));
     if (changeRatio(c.original, c.result) > 0.25) el.append(h("p", { class: "status err" }, "This changes more than grammar usually would. Check it's still what you meant before accepting."));
     el.append(h("div", { class: "row between" },
-      h("span", { class: "hint" }, `${changeCount(parts)} change${changeCount(parts) === 1 ? "" : "s"} · `,
-        h("button", { class: "link-btn", onclick: () => { const r = locate(c); if (r) selectInDraft(r.start, r.end); else toast("That text has changed in your draft."); } }, "show in draft")),
+      h("span", { class: "hint" }, `${changeCount(parts)} correction${changeCount(parts) === 1 ? "" : "s"} · `,
+        h("button", { class: "link-btn", onclick: () => { const r = locate(c); if (r) selectInDraft(r.start, r.end); else toast("That text has changed in your draft."); } }, "show in draft"),
+        c.scopeLabel && !c.scopeLabel.startsWith("paragraph ") ? [" · ", h("button", { class: "link-btn", onclick: () => runGrammarAll() }, "check whole draft")] : null),
       c.done ? h("span", { class: "ok-text" }, "Accepted") : h("div", { class: "row" },
         h("button", { class: "ghost small", onclick: () => dropCard(c) }, "Dismiss"),
         h("button", { class: "primary small", onclick: () => acceptText(c, c.result) }, "Accept"))));
@@ -875,12 +903,13 @@ function cardView(c) {
   if (c.kind === "review") {
     if (!c.result.length) el.append(h("p", { class: "ok-text" }, "No notes. It reads clearly."));
     el.append(h("ol", { class: "review" }, c.result.map((r, i) => {
-      const found = current.post.body.indexOf(r.quote);
+      const found = findQuote(current.post.body, r.quote);
       return h("li", { class: c.checked?.[i] ? "checked" : "" },
         h("div", { class: "row between nowrap" }, h("span", { class: "chip kind-" + slugify(r.kind || "note") }, r.kind || "note"),
           h("label", { class: "check small-text" }, h("input", { type: "checkbox", checked: !!c.checked?.[i], onchange: (e) => { (c.checked ||= {})[i] = e.target.checked; renderCards(); persistCards(); } }), "Done")),
-        h("button", { class: "quote", disabled: found < 0, title: found < 0 ? "Not found in the draft any more" : "Show in draft",
-          onclick: () => { const j = current.post.body.indexOf(r.quote); if (j >= 0) selectInDraft(j, j + r.quote.length); } }, clip(r.quote, 120)),
+        found
+          ? h("button", { class: "quote", title: "Show in draft", onclick: () => { const f = findQuote(current.post.body, r.quote); if (f) selectInDraft(f.start, f.end); } }, clip(r.quote, 120))
+          : h("p", { class: "quote missing", title: "This passage isn't in your draft any more, or the assistant misquoted it" }, clip(r.quote, 120), h("span", { class: "hint" }, " (not found in your draft)")),
         h("p", {}, r.note));
     })));
     el.append(h("div", { class: "row end" }, h("button", { class: "ghost small", onclick: () => runReview() }, "Review again")));
@@ -960,6 +989,8 @@ async function runTool(card, fn) {
   try {
     const result = await fn(card.ctl.signal);
     updateCard(card, { pending: false, result });
+    const st = store.getSettings();
+    if (!st.guideDone) { st.guideDone = true; store.saveSettings(st); $("#guide")?.remove(); autogrow(); }
     announceIfHidden(card);
   } catch (e) {
     if (e.cancelled) dropCard(card);
@@ -1078,7 +1109,7 @@ function runTitles() {
 function runOutline() {
   if (!requireModel()) return;
   if (!current.post.notes.length && wordCount(current.post.body) < 30) { toast("Add a few notes first; the outline is built from them."); return; }
-  runTool({ kind: "outline", scopeLabel: `${current.post.notes.length} notes` }, async (signal) => {
+  runTool({ kind: "outline", scopeLabel: current.post.notes.length ? `from ${current.post.notes.length} note${current.post.notes.length === 1 ? "" : "s"}` : "from your draft" }, async (signal) => {
     const o = await completeJSON({ ...P.outlinePrompt(current.post), signal, maxTokens: 900 });
     const list = (Array.isArray(o) ? o : []).filter((x) => x && x.heading).map((x) => ({ heading: String(x.heading), covers: String(x.covers || "") }));
     if (!list.length) throw new Error("No outline came back. Try again.");

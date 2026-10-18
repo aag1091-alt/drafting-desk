@@ -254,8 +254,8 @@ dialog:has(.narrow) { width: min(420px, calc(100vw - 32px)); }
 .capture-label { font-size: 14px; color: var(--muted); }
 .capture input { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); padding: 8px 10px; }
 
-.ask { display: flex; gap: 6px; align-items: flex-end; }
-.ask textarea { flex: 1; min-width: 0; font: 14px/1.45 var(--sans); padding: 7px 9px; resize: none; }
+.ask-form { display: flex; gap: 6px; align-items: flex-end; }
+.ask-form textarea { flex: 1; min-width: 0; font: 14px/1.45 var(--sans); padding: 7px 9px; resize: none; }
 .asked { margin: 0; font-weight: 600; }
 .answer { font-size: 14px; line-height: 1.55; }
 .answer p, .answer ul, .answer ol { margin: 0 0 0.6em; }
@@ -308,3 +308,13 @@ select { border: 1px solid var(--line); border-radius: 6px; background: var(--pa
 .export-meta { display: grid; gap: 10px; }
 .export-meta textarea { font: 14px/1.5 var(--sans); padding: 7px 10px; resize: vertical; }
 .export-meta input { width: 100%; border: 1px solid var(--line); border-radius: 6px; background: var(--sunk); padding: 7px 10px; min-width: 0; font-size: 14px; color: var(--fg); }
+
+/* all text boxes share the themed look */
+textarea { width: 100%; border: 1px solid var(--line); border-radius: var(--r); background: var(--sunk); color: var(--fg); padding: 8px 10px; line-height: 1.55; resize: vertical; font: inherit; }
+textarea:focus { outline: none; border-color: var(--accent); }
+.draft, .post-title-input { background: transparent; }
+.post-title-input { border: 0; border-bottom: 1px solid transparent; border-radius: 0; padding: 4px 0; }
+body.focus .guide { display: none; }
+.quote.missing { cursor: default; font-style: italic; color: var(--muted); margin: 0; }
+.back-link { color: var(--muted); font-size: 13px; text-decoration: none; margin-left: 12px; }
+.back-link:hover { color: var(--accent); }

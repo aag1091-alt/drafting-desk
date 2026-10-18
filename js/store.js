@@ -7,9 +7,7 @@ const SECRET_KEY = "dd.secrets.v1";    // API keys (localStorage or sessionStora
 
 export const STATUSES = ["Idea", "Drafting", "Editing", "Ready", "Published"];
 
-export const DEFAULT_VOICE = `Describe how you write so suggestions stay in your voice. Edit freely, or use "Learn from my writing" below.
-
-- First person, plain and direct.
+export const DEFAULT_VOICE = `- First person, plain and direct.
 - Short sentences mixed with longer explanatory ones.
 - Specific numbers and names over adjectives.
 - No hype or marketing words.`;

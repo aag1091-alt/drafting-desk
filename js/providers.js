@@ -97,6 +97,14 @@ export function isReady(settings = getSettings()) {
   return !!getSecret(p);
 }
 
+export function notReadyReason(settings = getSettings()) {
+  const p = settings.provider;
+  if (!settings.models[p]) return "Enter a model name, or use List models.";
+  if (p === "ollama" || p === "custom") return "Add the server address first.";
+  if (p === "openrouter") return "Sign in with OpenRouter (or paste a key) first.";
+  return `Paste your ${PROVIDERS[p].label} API key first.`;
+}
+
 // ---------- model lists ----------
 export async function listModels(settings = getSettings()) {
   const p = settings.provider;
@@ -254,7 +262,7 @@ async function completeOnce({ system, prompt, onText, signal, maxTokens = 2000, 
   const model = settings.models[p];
   const key = getSecret(p);
   const label = PROVIDERS[p]?.label || p;
-  if (!isReady(settings)) throw new Error("Pick a model provider in Settings first.");
+  if (!isReady(settings)) throw new Error(notReadyReason(settings));
 
   let full = "";
   const push = (t) => {
