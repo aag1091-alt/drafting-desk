@@ -483,6 +483,7 @@ function onDraftInput(e) {
   updateHighlights();
   layoutRail();
   if (answering && current.post.body.length - answering.start > 60) closeAnswering(true);
+  rememberSel(); // dictation and some keyboards never send keyup
   partnerTyped();
   clearTimeout(cardsTimer);
   if (cards.some((c) => !c.done && (c.kind === "grammar" || c.kind === "clarify"))) cardsTimer = setTimeout(renderCards, 600);
@@ -1749,7 +1750,8 @@ function partnerTyped() {
   if (!partnerOn()) return;
   partner.timer = setTimeout(() => partnerCheck(), 2600);
   const body = current.post.body;
-  if (lastSel.end >= body.trimEnd().length - 1 && wordCount(body) > 40) partner.idleTimer = setTimeout(() => runNext(true), nextIsStale() ? 9000 : 25000);
+  const caret = draft()?.selectionEnd ?? lastSel.end;
+  if (caret >= body.trimEnd().length - 1 && wordCount(body) > 40) partner.idleTimer = setTimeout(() => runNext(true), nextIsStale() ? 9000 : 25000);
 }
 /** Called when the cursor moves to another paragraph: look at what you just left. */
 let lastParaStart = -1;
