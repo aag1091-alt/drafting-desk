@@ -579,3 +579,50 @@ body.focus .focus-exit:hover, body.focus .focus-exit:focus-visible { opacity: 1;
   .sel-row { flex-wrap: nowrap; }
   .sel-ask { margin-left: 0; border-left: 1px solid color-mix(in srgb, var(--bg) 22%, transparent) !important; border-radius: 0 5px 5px 0 !important; padding-left: 12px !important; }
 }
+
+/* v3.2: one-line chips for suggestions about other paragraphs */
+.chip-card { all: unset; box-sizing: border-box; cursor: pointer; display: flex; flex-direction: column; gap: 2px; width: 100%; padding: 6px 12px; background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--line); border-radius: 10px; box-shadow: 0 1px 2px rgb(20 30 50 / 0.05); }
+.chip-card:hover, .chip-card:focus-visible { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.chip-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.chip-card .card-kind { font-size: 10.5px; letter-spacing: 0.05em; text-transform: uppercase; font-weight: 700; }
+.chip-text { font-size: 13.5px; line-height: 1.4; color: var(--fg); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.chip-card.pair-better .chip-text { font-family: var(--serif); font-size: 14.5px; }
+.chip-card.done { opacity: 0.6; }
+.rail-cards:not(.stacked) > .chip-card:not(:hover):not(:focus-visible) { opacity: 0.88; }
+
+/* the tools you run yourself wear the same colours as the partner */
+.tool-card { border-left: 3px solid var(--line); }
+.pair-grammar { border-left-color: var(--fix); } .pair-grammar .card-kind { color: var(--fix); }
+.pair-clarify { border-left-color: var(--better); } .pair-clarify .card-kind { color: var(--better); }
+.pair-prompt { border-left-color: var(--idea); } .pair-prompt .card-kind { color: var(--idea); }
+.pair-ask { border-left-color: var(--ask); } .pair-ask .card-kind { color: var(--ask); }
+.pair-review { border-left-color: var(--ask); }
+.tool-card .card-kind { font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; }
+.chip-card.pair-grammar .card-kind { color: var(--fix); } .chip-card.pair-clarify .card-kind { color: var(--better); } .chip-card.pair-prompt .card-kind { color: var(--idea); }
+.rail-cards:not(.stacked) > .chip-card { position: absolute; left: 0; right: 0; }
+.tool-card .option { border-top: 1px solid var(--line); padding-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+.tool-card .option .diff { font: 15px/1.5 var(--serif); margin: 0; }
+.tool-card .option .hint { margin: 0; font-size: 12.5px; }
+.tool-card .issue { font-size: 14px; }
+.next-btn { margin-left: auto; margin-right: 10px; border: 1px solid color-mix(in srgb, var(--idea) 45%, var(--line)); background: color-mix(in srgb, var(--idea) 8%, var(--panel)); color: var(--idea); border-radius: 999px; padding: 3px 11px; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+.next-btn:hover, .next-btn:focus-visible { background: color-mix(in srgb, var(--idea) 16%, var(--panel)); }
+
+/* notes dock: always at the bottom of the margin, open it to see everything */
+.desk > .rail { align-self: stretch; }
+.rail .notes-dock { margin-top: auto; position: sticky; bottom: 0; z-index: 8; background: var(--bg); border-top: 1px solid var(--line); padding: 10px 0 12px; gap: 8px; box-shadow: 0 -12px 18px -12px rgb(20 30 50 / 0.12); }
+.notes-dock .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.dock-toggle { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; border-radius: 6px; padding: 2px 4px 2px 0; }
+.dock-toggle:focus-visible { outline: 2px solid var(--accent); }
+.dock-toggle h2 { margin: 0; font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.dock-count { font-size: 12px; min-width: 20px; text-align: center; border-radius: 999px; background: var(--sunk); border: 1px solid var(--line); padding: 0 6px; color: var(--fg); }
+.dock-caret { color: var(--muted); font-size: 11px; transition: transform 0.2s; }
+.notes-dock.open .dock-caret { transform: rotate(180deg); }
+.notes-dock .dock-body, .notes-dock .dock-only { display: none; }
+.notes-dock.open .dock-body { display: flex; flex-direction: column; gap: 8px; max-height: 46vh; overflow: auto; padding-right: 2px; }
+.notes-dock.open .dock-only { display: inline-block; }
+.notes-dock .note-add > .row { display: none; }
+.notes-dock .note-add:focus-within > .row, .notes-dock.open .note-add > .row, .notes-dock .note-add:has(.source-form:not([hidden])) > .row { display: flex; }
+.notes-dock #newNote { min-height: 0; resize: none; transition: min-height 0.15s; }
+.notes-dock #newNote:focus, .notes-dock #newNote:not(:placeholder-shown) { min-height: 70px; }
+@media (max-width: 980px) { .rail .notes-dock { position: static; box-shadow: none; } }
+@media (min-width: 981px) { .notes-toggle { display: none; } }

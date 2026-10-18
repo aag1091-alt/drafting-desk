@@ -356,6 +356,8 @@ function renderEditor(post) {
   growTitle($(".post-title-input"));
   updateStats();
   updateContents();
+  cursorPara = paragraphAt(post.body, lastSel.end);
+  openCard = null;
   renderCards();
   partnerHello();
   if (!post.body) ta.focus();
@@ -470,6 +472,9 @@ function onDraftInput(e) {
   if (removed > 200) { addSnapshot("Before deleting " + removed.toLocaleString() + " characters", p.body); toast("The deleted text is kept in Versions", { action: { label: "Versions", run: openVersions } }); }
   else if (Date.now() - lastTimedVersion > 20 * 60e3 && p.body.trim()) { addSnapshot("While writing"); lastTimedVersion = Date.now(); }
   p.body = e.target.value;
+  // answers you've read fold away once you're writing again
+  const readAnswers = cards.filter((c) => ["ask", "titles", "outline"].includes(c.kind) && !c.pending && !c.error && c.collapsed !== true && Date.now() - c.at > 3000);
+  if (readAnswers.length) { readAnswers.forEach((c) => { c.collapsed = true; }); setTimeout(() => { renderCards(); persistCards(); }, 0); }
   if (p.status === "Idea" && wordCount(p.body) > 30) { p.status = "Drafting"; const sel = $(".status-select"); if (sel) sel.value = "Drafting"; }
   autogrow(false);
   keepCaretVisible();
@@ -519,7 +524,16 @@ function rememberSel() {
   const ta = draft();
   if (!ta) return;
   lastSel = { start: ta.selectionStart, end: ta.selectionEnd };
-  if (current) { current.post.cursor = ta.selectionEnd; partnerMoved(); markActive(); markActiveNotes(); }
+  if (current) {
+    current.post.cursor = ta.selectionEnd;
+    partnerMoved(); markActiveNotes();
+    const para = paragraphAt(current.post.body, ta.selectionEnd);
+    if (para.start !== cursorPara.start || para.end !== cursorPara.end) {
+      const moved = para.start !== cursorPara.start;
+      cursorPara = para;
+      if (moved) { openCard = null; renderCards(); } else markActive();
+    } else markActive();
+  }
   updateScope();
   updateSelBar();
 }
@@ -766,12 +780,15 @@ function selectInDraft(start, end) {
 
 // ---------- notes & research panel ----------
 function notesPanel() {
-  return h("aside", { class: "notes-col", id: "notesCol", "aria-label": "Notes and research" },
-    h("div", { class: "panel-head" }, h("h2", {}, "Notes & research"),
-      h("button", { class: "ghost small", onclick: runOutline, title: "Suggest section headings built only from your notes" }, "Suggest outline")),
+  const open = store.getSettings().notesOpen !== false && current.post.notes.length > 0;
+  return h("aside", { class: "notes-col notes-dock" + (open ? " open" : ""), id: "notesCol", "aria-label": "Notes and research" },
+    h("div", { class: "panel-head" },
+      h("button", { class: "dock-toggle", "aria-expanded": String(open), "aria-controls": "dockBody", title: "Show or hide your notes", onclick: () => setDock(!$("#notesCol").classList.contains("open")) },
+        h("h2", {}, "Notes & research"), h("span", { class: "dock-count", id: "dockCount" }, String(current.post.notes.length)), h("span", { class: "dock-caret", "aria-hidden": "true" }, "▴")),
+      h("button", { class: "ghost small dock-only", onclick: runOutline, title: "Suggest section headings built only from your notes" }, "Suggest outline")),
     h("div", { class: "note-add" },
       h("div", { id: "linkChip", class: "link-chip", hidden: true }),
-      h("textarea", { id: "newNote", rows: "3", placeholder: `Jot a thought, a fact, a line you might use… (${MOD}+Enter to add)`,
+      h("textarea", { id: "newNote", rows: "1", placeholder: `Jot a note… (${MOD}+Enter to add)`,
         onkeydown: (e) => { if ((isMac ? e.metaKey : e.ctrlKey) && e.key === "Enter") { e.preventDefault(); addNoteFromBox(); } } }),
       h("div", { class: "row between" },
         h("button", { class: "ghost small", onclick: () => { const f = $("#sourceForm"); f.hidden = !f.hidden; if (!f.hidden) $("#srcUrl").focus(); } }, "+ Source"),
@@ -785,11 +802,19 @@ function notesPanel() {
           h("div", { class: "row" },
             h("button", { class: "ghost small", onclick: () => { $("#sourceForm").hidden = true; } }, "Cancel"),
             h("button", { class: "primary small", onclick: addSource }, "Save source"))))),
+    h("div", { class: "dock-body", id: "dockBody" },
     h("div", { class: "note-filters", role: "group", "aria-label": "Filter notes" },
       ["all", "note", "source", "question"].map((k) => h("button", { class: "filter" + (noteFilter === k ? " on" : ""), "aria-pressed": String(noteFilter === k),
         onclick: () => { noteFilter = k; renderNotes(); } }, { all: "All", note: "Notes", source: "Sources", question: "Questions" }[k])),
       h("input", { class: "note-search", type: "search", placeholder: "Search", value: noteQuery, "aria-label": "Search notes", oninput: (e) => { noteQuery = e.target.value; renderNotes(); } })),
-    h("ul", { class: "notes", id: "noteList" }, noteItems()));
+    h("ul", { class: "notes", id: "noteList" }, noteItems())));
+}
+function setDock(open) {
+  const d = $("#notesCol");
+  if (!d) return;
+  d.classList.toggle("open", open);
+  d.querySelector(".dock-toggle").setAttribute("aria-expanded", String(open));
+  const st = store.getSettings(); st.notesOpen = open; store.saveSettings(st);
 }
 function noteItems() {
   const p = current.post;
@@ -818,6 +843,8 @@ function renderNotes() {
   if (current) updateHighlights();
   const b = $(".notes-toggle");
   if (b && current) b.textContent = `Notes (${current.post.notes.length})`;
+  const dc = $("#dockCount");
+  if (dc && current) dc.textContent = String(current.post.notes.length);
   document.querySelectorAll(".note-filters .filter").forEach((b, i) => {
     const k = ["all", "note", "source", "question"][i];
     b.classList.toggle("on", k === noteFilter);
@@ -847,6 +874,7 @@ function addNoteFromBox() {
   addNote(store.blankNote("note", pendingLink ? { text, anchor: pendingLink } : { text }));
   if (pendingLink) toast("Note linked to your text");
   setPendingLink(null);
+  if (current.post.notes.length === 1) setDock(true); // first note: show where notes collect
   box.value = "";
   box.focus();
 }
@@ -866,9 +894,8 @@ function noteOnSelection() {
   const quote = current.post.body.slice(start, end).trim();
   if (!quote) return;
   setPendingLink(quote.slice(0, 600));
-  const col = $("#notesCol");
-  col?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  setTimeout(() => $("#newNote")?.focus({ preventScroll: true }), 250);
+  if (narrow()) $("#notesCol")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  setTimeout(() => $("#newNote")?.focus({ preventScroll: true }), 50);
 }
 function linkNoteToSelection(n) {
   const { start, end } = lastSel;
@@ -970,8 +997,10 @@ function toggleNotes() {
   const col = $("#notesCol");
   if (!col) return;
   if (document.body.classList.contains("focus")) toggleFocus();
-  col.scrollIntoView({ behavior: "smooth", block: "start" });
-  setTimeout(() => $("#newNote")?.focus({ preventScroll: true }), 300);
+  const open = !col.classList.contains("open");
+  setDock(open);
+  if (narrow()) col.scrollIntoView({ behavior: "smooth", block: "start" });
+  if (open) setTimeout(() => $("#newNote")?.focus({ preventScroll: true }), 50);
 }
 function toggleFocus() {
   document.body.classList.toggle("focus");
@@ -994,6 +1023,7 @@ function partnerRail() {
   return h("aside", { class: "rail", id: "rail", "aria-label": "Writing partner" },
     h("div", { class: "rail-head" },
       h("span", { class: "partner-name" }, h("span", { class: "partner-dot" + (on && isReady() ? " live" : ""), id: "partnerDot", "aria-hidden": "true" }), "Partner"),
+      h("button", { class: "next-btn", onclick: () => runNext(), title: "Ideas for what to write next, from your draft and notes" }, "✦ What next?"),
       h("label", { class: "switch", title: on ? "Partner chimes in when you pause" : "Partner stays quiet until you ask" },
         h("input", { type: "checkbox", id: "partnerOn", checked: on, onchange: (e) => { const s2 = store.getSettings(); s2.partner = e.target.checked; store.saveSettings(s2); $("#partnerDot").classList.toggle("live", e.target.checked && isReady()); toast(e.target.checked ? "Partner will chime in when you pause" : "Partner is quiet; ask whenever you like"); } }),
         h("span", {}, "Chime in"))),
@@ -1002,7 +1032,6 @@ function partnerRail() {
         onkeydown: (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); runAsk(); } } })),
     // shortcuts appear under the ask box when you go to it (and when the margin is empty)
     h("div", { class: "chips", onmousedown: (e) => e.preventDefault() },
-      h("button", { class: "chip-btn", onclick: () => { $("#askBox").blur(); runNext(); } }, "What next?"),
       h("button", { class: "chip-btn", onclick: () => { $("#askBox").blur(); runReview(); } }, "Review my draft"),
       h("button", { class: "chip-btn", onclick: () => { $("#askBox").blur(); runGrammarAll(); } }, "Check spelling")),
     h("div", { id: "cards", class: "cards rail-cards", "aria-live": "polite" }),
@@ -1026,7 +1055,8 @@ function renderCards() {
   const visible = cards.filter((c) => !(c.kind === "pair" && c.done));
   box.replaceChildren(...(visible.length ? visible.map((c) => {
     const i = cards.indexOf(c);
-    const el = isCollapsed(c, i) ? cardSummary(c) : cardView(c);
+    const r = c.anchor && c.anchor !== "top" && !c.pending ? anchorRange(c) : null;
+    const el = !folded(c, i) ? cardView(c) : r ? cardChip(c) : cardSummary(c);
     el.addEventListener("mouseenter", () => flashAnchor(c, true));
     el.addEventListener("mouseleave", () => flashAnchor(c, false));
     return el;
@@ -1034,6 +1064,7 @@ function renderCards() {
   markActive();
   layoutRail();
   updatePeek();
+  cards.forEach((c) => { delete c.fresh; });
 }
 const narrow = () => window.matchMedia("(max-width: 980px)").matches;
 /** On phones the margin sits under the draft; a small badge says when the partner has something. */
@@ -1152,6 +1183,35 @@ function isCollapsed(c, i) {
   if (c.kind === "outline") return i > 2;
   return c.done || (i > 0 && AUTO_FOLD.has(c.kind));
 }
+/** The margin follows your cursor: cards about the paragraph you're in open up; the rest wait as one-line chips beside their paragraph. */
+let openCard = null;
+let cursorPara = { start: -1, end: -1 };
+function folded(c, i) {
+  if (c.pending || c.error || c.kind === "next") return false;
+  if (c.kind === "pair" && c.sub === "fix") return false; // already a single line
+  const r = c.anchor && c.anchor !== "top" ? anchorRange(c) : null;
+  if (!r) return isCollapsed(c, i); // answers, titles, outlines: as before
+  if (c.done) return true;
+  if (c.id === openCard) return false;
+  if (c.collapsed === false && c.at && Date.now() - c.at < 4000) return false; // you just asked for it
+  return !(r.start >= cursorPara.start && r.start <= cursorPara.end);
+}
+function cardPreview(c) {
+  if (c.kind === "pair") return c.sub === "better" ? `“${clip(c.result, 90)}”` : c.result?.text || "";
+  if (c.kind === "note") return c.result?.note || "";
+  if (c.kind === "clarify") return c.result?.issue || "";
+  if (c.kind === "grammar") return c.done ? "applied" : c.result === c.original ? "no issues" : `${changeCount(wordDiff(c.original, c.result))} correction(s)`;
+  if (c.kind === "prompt") return (c.result || [])[0] || "";
+  return c.question || c.original || "";
+}
+function cardChip(c) {
+  const label = c.kind === "pair" ? PAIR_LABEL[c.sub] : c.kind === "note" ? (c.sub || "Note") : KIND_LABEL[c.kind];
+  return h("button", { class: `card chip-card pair-card pair-${c.kind === "pair" ? c.sub : c.kind}` + (c.fresh ? " fresh" : "") + (c.done ? " done" : ""), "data-card": c.id,
+    title: "Open this suggestion", "aria-expanded": "false",
+    onclick: () => { openCard = c.id; renderCards(); requestAnimationFrame(() => flashAnchor(c, true)); setTimeout(() => flashAnchor(c, false), 1200); } },
+    h("span", { class: "card-kind" }, label),
+    h("span", { class: "chip-text" }, clip(String(cardPreview(c)).replace(/\s+/g, " "), 140)));
+}
 function cardSummary(c) {
   const status = c.done ? "applied" : c.kind === "grammar" && c.result === c.original ? "no issues" : c.kind === "review" ? `${(c.result || []).length} notes` : "";
   const what = c.question || c.original || c.scopeLabel || "";
@@ -1239,13 +1299,14 @@ function partnerCardBody(c, el) {
 function cardView(c) {
   const head = h("div", { class: "card-head" },
     h("span", { class: "card-kind" }, c.kind === "pair" ? PAIR_LABEL[c.sub] || "Partner" : c.kind === "note" ? c.sub || "Note" : KIND_LABEL[c.kind]),
-    c.scopeLabel ? h("span", { class: "card-scope" }, c.scopeLabel) : null,
+    c.scopeLabel && c.kind !== "clarify" && c.kind !== "grammar" ? h("span", { class: "card-scope" }, c.scopeLabel) : null,
     c.at && Date.now() - c.at > 3600e3 ? h("span", { class: "card-scope" }, "· " + timeAgo(c.at)) : null,
     c.pending || ["pair", "note", "next"].includes(c.kind) ? null : h("button", { class: "icon-btn small fold", "aria-label": "Fold", title: "Fold", onclick: () => { c.collapsed = true; renderCards(); persistCards(); } }, "–"),
     h("button", { class: "icon-btn small", "aria-label": "Dismiss", title: "Dismiss", onclick: () => { c.ctl?.abort(); dropCard(c); } }, "×"));
   const el = h("article", { class: "card " + c.kind + (c.done ? " done" : "") + (c.fresh ? " fresh" : ""), "data-card": c.id }, c.kind === "pair" && c.sub === "fix" ? null : head);
   if (c.kind === "pair" || c.kind === "note" || c.kind === "next") return partnerCardBody(c, el);
-  if (c.original && c.kind !== "review" && c.kind !== "grammar") {
+  el.classList.add("tool-card", "pair-" + c.kind); // same look as the partner's notes
+  if (c.original && c.kind !== "review" && c.kind !== "grammar" && c.kind !== "clarify") {
     el.append(h("button", { class: "quote", title: "Show in draft", onclick: () => { const r = locate(c); if (r) selectInDraft(r.start, r.end); else toast("That text has changed in your draft."); } }, clip(c.original, 160)));
   }
   if (c.pending && c.kind === "ask" && c.partial) {
@@ -1307,11 +1368,10 @@ function cardView(c) {
         ? h("p", { class: "diff" }, wordDiff(c.original, o.text).map((p) => p.type === "same" ? p.text : p.type === "add" ? h("ins", {}, p.text) : h("del", {}, p.text)))
         : h("p", { class: "diff" }, o.text);
       el.append(h("div", { class: "option" + (c.chosen === i ? " chosen" : "") },
-        h("span", { class: "option-num" }, `Option ${i + 1}`),
         body,
         o.why ? h("p", { class: "hint" }, o.why) : null,
         h("div", { class: "row" },
-          c.done ? null : h("button", { class: "ghost small", onclick: () => { c.chosen = i; acceptText(c, o.text); } }, "Use this"),
+          c.done ? null : h("button", { class: i === 0 ? "primary small" : "ghost small", title: i === 0 ? "Use this wording (Alt+Enter)" : "Use this wording", onclick: () => { c.chosen = i; acceptText(c, o.text); } }, "Use"),
           h("button", { class: "link-btn small-text", onclick: () => { c.diffOn[i] = !showDiff; renderCards(); } }, showDiff ? "hide changes" : "show changes"))));
     });
     if (c.result.question) el.append(h("p", { class: "question" }, h("strong", {}, "Question for you: "), c.result.question,
@@ -1760,7 +1820,9 @@ async function runNext(auto = false) {
   if (!auto && !requireModel()) return;
   if (auto && (!partnerOn() || cards.some((c) => c.kind === "next" && Date.now() - c.at < 180e3))) return;
   const post = current.post, postId = post.id;
-  if (auto) setPartnerThinking(true);
+  const btn = $(".next-btn");
+  setPartnerThinking(true);
+  if (btn && !auto) { btn.disabled = true; btn.textContent = "✦ Thinking…"; }
   try {
     const list = await completeJSON({ ...P.nextPrompt(post), maxTokens: 700 });
     if (!current || current.post.id !== postId) return;
@@ -1770,7 +1832,7 @@ async function runNext(auto = false) {
     cards.unshift({ kind: "next", id: store.newId(), postId, at: Date.now(), anchor: "end", result: items, fresh: true });
     renderCards(); persistCards();
   } catch (e) { if (!auto) toast(e.message, { error: true }); }
-  finally { if (auto) setPartnerThinking(false); }
+  finally { setPartnerThinking(false); if (btn) { btn.disabled = false; btn.textContent = "✦ What next?"; } }
 }
 /** Opening an empty post: offer a few ways to start. */
 function partnerHello() {
