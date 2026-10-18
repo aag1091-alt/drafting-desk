@@ -628,3 +628,6 @@ body.focus .focus-exit:hover, body.focus .focus-exit:focus-visible { opacity: 1;
 @media (min-width: 981px) { .notes-toggle { display: none; } }
 .pair-next.stale .nudges { opacity: 0.6; }
 .pair-next .hint.row { display: flex; align-items: center; gap: 8px; }
+.draft-wrap .answering { position: absolute; left: 0; right: 0; z-index: 3; background: transparent; border: 0; padding: 0; display: flex; align-items: center; gap: 6px; justify-content: flex-start; pointer-events: none; }
+.draft-wrap .answering .answering-q { font: italic 14.5px/1.4 var(--sans); color: var(--idea); background: color-mix(in srgb, var(--idea) 9%, var(--bg)); border-radius: 6px; padding: 3px 9px; max-width: 90%; }
+.draft-wrap .answering button { pointer-events: auto; }

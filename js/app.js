@@ -978,12 +978,17 @@ function answerQuestion(q) {
 let answering = null;
 function showAnswering(q) {
   $("#answering")?.remove();
+  const ta = draft();
+  const pos = ta.selectionStart;
   answering = { q, start: current.post.body.length };
+  // the prompt sits right above the line you're about to write, like a note to yourself
   const bar = h("div", { class: "answering", id: "answering", role: "status" },
-    h("span", {}, h("strong", {}, "Answering: "), q),
-    h("button", { class: "link-btn", onclick: () => closeAnswering(true) }, "Done"));
-  $(".draft-wrap").before(bar);
-  draft().focus();
+    h("span", { class: "answering-q" }, "✦ ", q),
+    h("button", { class: "icon-btn small", title: "Hide this prompt", "aria-label": "Hide this prompt", onmousedown: (e) => e.preventDefault(), onclick: () => closeAnswering(true) }, "×"));
+  $(".draft-wrap").append(bar);
+  const pt = caretPoint(ta, pos);
+  bar.style.top = Math.max(0, pt.top - bar.offsetHeight - 2) + "px";
+  ta.focus();
 }
 function closeAnswering(done) {
   $("#answering")?.remove();
