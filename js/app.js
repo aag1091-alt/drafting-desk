@@ -1,7 +1,7 @@
 import * as store from "./store.js?v=__V__";
 import { PROVIDERS, startOpenRouterLogin, finishOpenRouterLogin, isReady, listModels, complete, completeJSON, health } from "./providers.js?v=__V__";
 import * as P from "./prompts.js?v=__V__";
-import { renderMarkdown, postToMarkdown, slugify, wordCount } from "./markdown.js?v=__V__";
+import { renderMarkdown, postToMarkdown, slugify, wordCount, parseMarkdownPost } from "./markdown.js?v=__V__";
 import { wordDiff, addedChars, changeCount, paraDiff } from "./diff.js?v=__V__";
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -103,6 +103,14 @@ function modelButton() {
 
 // ---------- home ----------
 let homeQuery = "", homeStatus = "All";
+function backupNudge(posts) {
+  const words = posts.reduce((n, p) => n + wordCount(p.body), 0);
+  const last = store.getSettings().lastBackup || 0;
+  if (words < 300 || Date.now() - last < 14 * 864e5) return null;
+  return h("div", { class: "backup-nudge", role: "note" },
+    h("span", {}, last ? `Last backup ${timeAgo(last)}.` : "Your posts are stored only in this browser.", " Clearing site data or switching computers would lose them."),
+    h("button", { class: "ghost small", onclick: exportBackup }, "Back up now"));
+}
 function snippet(p) {
   const t = p.body.replace(/^#.*$/gm, "").replace(/[*_`>#\[\]]/g, "").replace(/\(https?:[^)]+\)/g, "").replace(/\s+/g, " ").trim();
   return t ? clip(t, 140) : (p.notes[0] ? clip("Note: " + p.notes[0].text, 140) : "");
@@ -143,6 +151,7 @@ function renderHome() {
         h("div", { class: "row nowrap" },
           h("input", { id: "ideaBox", placeholder: "e.g. Why config is a grammar problem, not a reasoning one", autocomplete: "off" }),
           h("button", { class: "ghost" }, "Save idea"))),
+      backupNudge(posts),
       h("section", { class: "posts" },
         h("div", { class: "row between" },
           h("h2", {}, posts.length ? "Your posts" : "No posts yet"),
@@ -175,19 +184,32 @@ async function loadSample() {
   } catch { toast("Couldn't load the example.", { error: true }); }
 }
 function exportBackup() {
+  const st = store.getSettings(); st.lastBackup = Date.now(); store.saveSettings(st);
+  document.querySelector(".backup-nudge")?.remove();
   downloadText(`drafting-desk-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(store.exportAll(), null, 2), "application/json");
 }
 $("#importFile").addEventListener("change", async (e) => {
-  const f = e.target.files[0];
+  const files = [...e.target.files];
   e.target.value = "";
-  if (!f) return;
-  try {
-    const data = JSON.parse(await f.text());
-    const posts = Array.isArray(data.posts) ? data.posts : [data];
-    posts.forEach((p) => store.importPost(p));
-    toast(`Imported ${posts.length} post${posts.length === 1 ? "" : "s"}`);
-    route();
-  } catch (err) { toast(err.message || "Couldn't read that file.", { error: true }); }
+  let n = 0;
+  for (const f of files) {
+    try {
+      const text = await f.text();
+      if (/\.json$/i.test(f.name) || /^\s*[{[]/.test(text)) {
+        const data = JSON.parse(text);
+        const posts = Array.isArray(data.posts) ? data.posts : [data];
+        posts.forEach((p) => store.importPost(p));
+        n += posts.length;
+      } else {
+        const fields = parseMarkdownPost(text, f.name);
+        const post = store.blankPost(fields.title);
+        Object.assign(post, { body: fields.body, description: fields.description, tags: fields.tags, status: wordCount(fields.body) > 30 ? "Drafting" : "Idea" });
+        store.savePost(post);
+        n++;
+      }
+    } catch (err) { toast(`${f.name}: ${err.message || "couldn't read it"}`, { error: true }); }
+  }
+  if (n) { toast(`Imported ${n} post${n === 1 ? "" : "s"}`); route(); }
 });
 
 // ---------- new post ----------

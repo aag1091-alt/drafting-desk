@@ -71,3 +71,28 @@ export function wordCount(s) {
 export function slugify(t) {
   return String(t).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "post";
 }
+
+/** Turn a Markdown file (optionally with Jekyll front matter) into post fields. */
+export function parseMarkdownPost(text, filename = "") {
+  let body = String(text).replace(/\r\n/g, "\n");
+  const fields = {};
+  const fm = body.match(/^---\n([\s\S]*?)\n---\n?/);
+  if (fm) {
+    body = body.slice(fm[0].length);
+    for (const line of fm[1].split("\n")) {
+      const m = line.match(/^([A-Za-z_]+):\s*(.*)$/);
+      if (!m) continue;
+      let v = m[2].trim();
+      if (/^\[.*\]$/.test(v)) v = v.slice(1, -1).split(",").map((x) => x.trim().replace(/^["']|["']$/g, "")).filter(Boolean).join(", ");
+      else v = v.replace(/^["']|["']$/g, "").replace(/\\"/g, '"');
+      fields[m[1].toLowerCase()] = v;
+    }
+  }
+  let title = fields.title || "";
+  if (!title) {
+    const h1 = body.match(/^#\s+(.+)\n+/);
+    if (h1) { title = h1[1].trim(); body = body.slice(h1.index + h1[0].length); }
+  }
+  if (!title) title = filename.replace(/\.(md|markdown|txt)$/i, "").replace(/^\d{4}-\d{2}-\d{2}-/, "").replace(/[-_]+/g, " ").trim().replace(/^./, (c) => c.toUpperCase()) || "Imported post";
+  return { title, body: body.replace(/^\s+/, ""), description: fields.description || fields.excerpt || "", tags: fields.tags || fields.categories || "" };
+}

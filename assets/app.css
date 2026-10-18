@@ -371,3 +371,6 @@ body.focus .guide { display: none; }
 .home.returning .posts { order: 1; }
 .home.returning .capture { order: 1; }
 .note-text { cursor: text; }
+
+.backup-nudge { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 10px 14px; border-radius: 8px; background: color-mix(in srgb, var(--warn) 12%, var(--panel)); border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent); font-size: 14px; }
+.home.returning .backup-nudge { order: 0; }
