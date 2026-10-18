@@ -1210,7 +1210,9 @@ function cardChip(c) {
     title: "Open this suggestion", "aria-expanded": "false",
     onclick: () => { openCard = c.id; renderCards(); requestAnimationFrame(() => flashAnchor(c, true)); setTimeout(() => flashAnchor(c, false), 1200); } },
     h("span", { class: "card-kind" }, label),
-    h("span", { class: "chip-text" }, clip(String(cardPreview(c)).replace(/\s+/g, " "), 140)));
+    c.kind === "pair" && c.sub === "better"
+      ? h("span", { class: "chip-text diff" }, trimDiff(wordDiff(c.original, c.result), 3).map((p) => p.type === "same" ? p.text : h(p.type === "add" ? "ins" : "del", {}, p.text)))
+      : h("span", { class: "chip-text" }, clip(String(cardPreview(c)).replace(/\s+/g, " "), 140)));
 }
 function cardSummary(c) {
   const status = c.done ? "applied" : c.kind === "grammar" && c.result === c.original ? "no issues" : c.kind === "review" ? `${(c.result || []).length} notes` : "";
