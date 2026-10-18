@@ -1412,6 +1412,23 @@ function correctionsThatFit(original, text, body) {
   }
   return fixes;
 }
+/** The partner often offers a typo fix and a rewording of the same sentence. Accepting one keeps the other useful. */
+function rebasePairs(card, r, text) {
+  for (const o of cards) {
+    if (o === card || o.kind !== "pair" || o.done) continue;
+    if (card.sub === "fix" && o.sub === "better" && o.original.includes(card.original)) {
+      const esc = card.original.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const re = new RegExp(`(^|[^\\w'])${esc}(?![\\w'])`);
+      const swap = (t) => t.replace(re, (m, pre) => pre + text);
+      o.original = o.anchor = swap(o.original);
+      o.result = swap(o.result); // keep the fix in the rewording too
+    } else if (card.sub === "better" && o.sub === "fix") {
+      const at = findQuote(current.post.body, o.anchor);
+      // the rewording already covered this word: drop the fix if it no longer fits
+      if (!at || (at.start >= r.start && at.start <= r.start + text.length)) o.done = true;
+    }
+  }
+}
 function acceptText(card, text) {
   const r = locate(card);
   if (!r && card.kind === "grammar") {
@@ -1426,8 +1443,9 @@ function acceptText(card, text) {
   if (!r) { toast("That passage changed since you asked. Run the tool again.", { error: true }); return; }
   const before = current.post.body;
   // Spelling and grammar fixes are still the writer's words; only rewordings count.
-  const added = card.kind === "grammar" ? 0 : addedChars(card.original, text);
+  const added = card.kind === "grammar" || card.sub === "fix" ? 0 : addedChars(card.original, text);
   replaceRange(r.start, r.end, text);
+  if (card.kind === "pair") rebasePairs(card, r, text);
   // when the last fix from a whole-draft check is applied, the draft counts as checked
   if (card.batch && !cards.some((c) => c !== card && c.batch === card.batch && !c.done && c.result !== c.original)) current.post.grammarCheckedBody = current.post.body;
   current.post.aiChars += added;
