@@ -374,3 +374,9 @@ body.focus .guide { display: none; }
 
 .backup-nudge { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 10px 14px; border-radius: 8px; background: color-mix(in srgb, var(--warn) 12%, var(--panel)); border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent); font-size: 14px; }
 .home.returning .backup-nudge { order: 0; }
+
+.cmp-block { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; }
+.cmp-block .diff { margin: 0; }
+
+.answering { position: sticky; top: 52px; z-index: 3; box-shadow: var(--shadow); }
+.stale { color: var(--warn); margin: 0; }

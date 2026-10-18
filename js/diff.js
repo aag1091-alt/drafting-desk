@@ -39,21 +39,28 @@ export function addedChars(a, b) {
   return wordDiff(a, b).filter((p) => p.type === "add").reduce((n, p) => n + p.text.replace(/\s+/g, "").length, 0);
 }
 
-/** Corrections, counting a deletion followed by its replacement as one. */
+/** Corrections: a run of changes separated only by spaces counts as one. */
 export function changeCount(parts) {
-  let n = 0;
-  for (let i = 0; i < parts.length; i++) {
-    const p = parts[i];
-    if (p.type === "same" || !p.text.trim()) continue;
-    n++;
-    if (p.type === "del" && parts[i + 1]?.type === "add") i++;
+  let n = 0, inChange = false;
+  for (const p of parts) {
+    if (p.type === "same") { if (p.text.trim()) inChange = false; continue; }
+    if (!p.text.trim()) continue;
+    if (!inChange) { n++; inChange = true; }
   }
   return n;
 }
 
-/** Paragraph-level diff, with word diffs inside paragraphs that changed. */
+function similarity(a, b) {
+  const wa = new Set(a.toLowerCase().match(/[\p{L}\p{N}']+/gu) || []), wb = new Set(b.toLowerCase().match(/[\p{L}\p{N}']+/gu) || []);
+  if (!wa.size || !wb.size) return 0;
+  let both = 0;
+  for (const w of wa) if (wb.has(w)) both++;
+  return both / Math.max(wa.size, wb.size);
+}
+
+/** Paragraph-level diff: unchanged, moved, edited (with word diff), added, removed. */
 export function paraDiff(a, b) {
-  const A = String(a).split(/\n{2,}/), B = String(b).split(/\n{2,}/);
+  const A = String(a).split(/\n{2,}/).filter((x) => x.trim()), B = String(b).split(/\n{2,}/).filter((x) => x.trim());
   const n = A.length, m = B.length;
   const dp = Array.from({ length: n + 1 }, () => new Uint32Array(m + 1));
   for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) dp[i][j] = A[i] === B[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
@@ -66,11 +73,18 @@ export function paraDiff(a, b) {
   }
   while (i < n) raw.push({ type: "del", text: A[i++] });
   while (j < m) raw.push({ type: "add", text: B[j++] });
-  // pair a deletion followed by an addition into an edited paragraph
+  // a paragraph removed in one place and added in another is a move
+  const adds = raw.filter((r) => r.type === "add");
+  for (const r of raw) {
+    if (r.type !== "del") continue;
+    const twin = adds.find((x) => !x.matched && x.text === r.text);
+    if (twin) { twin.matched = true; r.type = "moved-from"; twin.type = "moved-to"; }
+  }
+  // pair a removal followed by a similar addition into an edit
   const out = [];
   for (let k = 0; k < raw.length; k++) {
     const r = raw[k], nx = raw[k + 1];
-    if (r.type === "del" && nx?.type === "add") { out.push({ type: "edit", parts: wordDiff(r.text, nx.text) }); k++; }
+    if (r.type === "del" && nx?.type === "add" && similarity(r.text, nx.text) >= 0.3) { out.push({ type: "edit", before: r.text, after: nx.text, parts: wordDiff(r.text, nx.text) }); k++; }
     else out.push(r);
   }
   return out;

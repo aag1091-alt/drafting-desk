@@ -61,7 +61,8 @@ export function postToMarkdown(post, { frontMatter = true } = {}) {
       (tags.length ? `tags: [${tags.map(q).join(", ")}]\n` : "") +
       "---\n\n"
     : `# ${post.title}\n\n${post.description ? `*${post.description}*\n\n` : ""}`;
-  return (head + post.body.trim()).trimEnd() + "\n";
+  const body = post.body.replace(/\r\n/g, "\n").replace(/[ \t]+$/gm, "").replace(/\n{3,}/g, "\n\n").trim();
+  return (head + body).trimEnd() + "\n";
 }
 
 export function wordCount(s) {

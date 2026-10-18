@@ -261,11 +261,15 @@ function autoVersion() {
     addSnapshot(`Start of ${new Date().toLocaleDateString(undefined, { month: "short", day: "numeric" })}`);
   }
 }
-function addSnapshot(label) {
+function addSnapshot(label, body = current.post.body) {
   const p = current.post;
-  p.snapshots.push({ id: store.newId(), at: Date.now(), label: label || "", body: p.body });
-  if (p.snapshots.length > 40) p.snapshots.splice(0, p.snapshots.length - 40);
+  const last = p.snapshots[p.snapshots.length - 1];
+  if (!body.trim() || (last && last.body === body)) return false; // nothing new to keep
+  p.snapshots.push({ id: store.newId(), at: Date.now(), label: label || "", body });
+  if (p.snapshots.length > 60) p.snapshots.splice(0, p.snapshots.length - 60);
+  return true;
 }
+let lastTimedVersion = 0;
 
 function notesOpen() {
   const s = store.getSettings();
@@ -274,7 +278,16 @@ function notesOpen() {
 }
 let sessionNotesOpen = false;
 function renderEditor(post) {
-  if (current?.post.id !== post.id) lastSel = { start: post.body.length, end: post.body.length };
+  if (current?.post.id !== post.id) {
+    const c = Math.min(Number.isFinite(post.cursor) ? post.cursor : post.body.length, post.body.length);
+    lastSel = { start: c, end: c };
+    // a version each time you open a post, so earlier sittings are always recoverable
+    if (post.body.trim()) {
+      const last = post.snapshots[post.snapshots.length - 1];
+      if (!last || last.body !== post.body) { post.snapshots.push({ id: store.newId(), at: Date.now(), label: "When opened", body: post.body }); store.savePost(post); }
+    }
+    lastTimedVersion = Date.now();
+  }
   current = { post, versionedToday: false };
   document.title = `${post.title} · Drafting Desk`;
   const s = { ...store.getSettings(), notesOpen: notesOpen() };
@@ -350,7 +363,10 @@ function renderEditor(post) {
   updateContents();
   renderCards();
   if (!post.body) ta.focus();
-  else { ta.setSelectionRange(lastSel.start, lastSel.end); }
+  else {
+    ta.setSelectionRange(lastSel.start, lastSel.end);
+    if (!window.matchMedia("(pointer: coarse)").matches) { ta.focus({ preventScroll: true }); requestAnimationFrame(() => keepCaretVisible(true)); }
+  }
 }
 
 function growTitle(el) {
@@ -413,11 +429,17 @@ function askAboutSelection() {
 function onDraftInput(e) {
   const p = current.post;
   if (!current.versionedToday) { autoVersion(); current.versionedToday = true; }
+  // keep what was there before any big deletion, and a version every 20 minutes of writing
+  const removed = p.body.length - e.target.value.length;
+  if (removed > 200) { addSnapshot("Before deleting " + removed.toLocaleString() + " characters", p.body); toast("The deleted text is kept in Versions", { action: { label: "Versions", run: openVersions } }); }
+  else if (Date.now() - lastTimedVersion > 20 * 60e3 && p.body.trim()) { addSnapshot("While writing"); lastTimedVersion = Date.now(); }
   p.body = e.target.value;
   if (p.status === "Idea" && wordCount(p.body) > 30) { p.status = "Drafting"; const sel = $(".status-select"); if (sel) sel.value = "Drafting"; }
   autogrow(false);
   keepCaretVisible();
   updateHighlights();
+  clearTimeout(cardsTimer);
+  if (cards.some((c) => !c.done && (c.kind === "grammar" || c.kind === "clarify"))) cardsTimer = setTimeout(renderCards, 600);
   clearTimeout(shrinkTimer);
   shrinkTimer = setTimeout(() => autogrow(true), 800);
   updateStats();
@@ -458,6 +480,7 @@ function rememberSel() {
   const ta = draft();
   if (!ta) return;
   lastSel = { start: ta.selectionStart, end: ta.selectionEnd };
+  if (current) current.post.cursor = ta.selectionEnd;
   updateScope();
   updateSelBar();
 }
@@ -477,10 +500,10 @@ function autogrow(full = true) {
   if (bd) bd.style.height = ta.style.height;
   window.scrollTo(0, y);
 }
-let shrinkTimer;
+let shrinkTimer, cardsTimer;
 let caretFrame = 0;
 /** The draft grows instead of scrolling, so keep the line being typed on screen ourselves. */
-function keepCaretVisible() {
+function keepCaretVisible(center = false) {
   cancelAnimationFrame(caretFrame);
   caretFrame = requestAnimationFrame(() => {
     const ta = draft();
@@ -488,6 +511,7 @@ function keepCaretVisible() {
     const top = caretOffset(ta, ta.selectionEnd);
     const y = ta.getBoundingClientRect().top + top;
     const lh = parseFloat(getComputedStyle(ta).lineHeight) || 30;
+    if (center) { if (y > window.innerHeight * 0.7 || y < 0) window.scrollBy(0, y - window.innerHeight / 2); return; }
     const bottomRoom = window.innerHeight - 48;
     if (y + lh > bottomRoom) window.scrollBy(0, y + lh - bottomRoom);
     else if (y < 64) window.scrollBy(0, y - 64);
@@ -524,7 +548,7 @@ function caretOffset(ta, index) {
   mirror.remove();
   return top;
 }
-window.addEventListener("resize", autogrow);
+window.addEventListener("resize", () => { autogrow(); hideSelBar(); });
 
 /** Find a quoted passage even if the model changed quotes, spacing or case slightly. */
 function findQuote(body, quote) {
@@ -900,11 +924,12 @@ function requireModel() {
 }
 const KIND_LABEL = { titles: "Title ideas",  grammar: "Grammar", clarify: "Make it clearer", prompt: "I'm stuck", review: "Review", outline: "Outline", ask: "Ask" };
 
-const AUTO_FOLD = new Set(["grammar", "clarify", "titles", "outline", "prompt"]);
+const AUTO_FOLD = new Set(["grammar", "clarify", "titles", "prompt"]);
 function isCollapsed(c, i) {
   if (c.pending || c.error) return false;
   if (c.collapsed != null) return c.collapsed;
   if (c.batch) return !!c.done; // whole-draft results stay open until handled
+  if (c.kind === "outline") return i > 2;
   return c.done || (i > 0 && AUTO_FOLD.has(c.kind));
 }
 function cardSummary(c) {
@@ -959,6 +984,7 @@ function cardView(c) {
       return el;
     }
     const parts = wordDiff(c.original, c.result);
+    if (!c.done && !locate(c)) el.append(h("p", { class: "hint stale" }, "You've edited this passage since. Accept applies the corrections that still fit."));
     el.append(h("p", { class: "diff" }, parts.map((p) => p.type === "same" ? p.text : h(p.type === "add" ? "ins" : "del", {}, p.text))));
     if (changeRatio(c.original, c.result) > 0.25) el.append(h("p", { class: "status err" }, "This changes more than grammar usually would. Check it's still what you meant before accepting."));
     el.append(h("div", { class: "row between" },
@@ -971,6 +997,11 @@ function cardView(c) {
   }
 
   if (c.kind === "clarify") {
+    if (!c.done && !locate(c)) {
+      el.append(h("p", { class: "hint stale" }, "You've edited this sentence since these options were made."),
+        h("button", { class: "ghost small", onclick: () => { dropCard(c); const r = findQuote(current.post.body, c.original.slice(0, 40)); if (r) selectInDraft(r.start, r.end); runClarify(); } }, "Run again on the new wording"));
+      return el;
+    }
     el.append(h("p", { class: "issue" }, c.result.issue || ""));
     (c.result.options || []).forEach((o, i) => {
       // Light edits read best as a diff; restructured sentences read best as clean text.
@@ -1050,6 +1081,7 @@ function cardView(c) {
       const after = body.slice(at).replace(/^\s+/, "");
       const skel = c.result.map((o) => `## ${o.heading}`).join("\n\n");
       replaceRange(0, body.length, (before ? before + "\n\n" : "") + skel + (after ? "\n\n" + after : "\n"));
+      addNote(store.blankNote("note", { text: "Outline:\n" + c.result.map((o) => `- ${o.heading}${o.covers ? ": " + o.covers : ""}`).join("\n") }));
       current.post.aiChars += addedChars("", c.result.map((o) => o.heading).join(" "));
       updateStats();
       updateCard(c, { done: true });
@@ -1058,8 +1090,47 @@ function cardView(c) {
   return el;
 }
 
+/** Re-apply a suggestion's individual changes by their surrounding words, when the passage was edited since. */
+function correctionsThatFit(original, text, body) {
+  const parts = wordDiff(original, text);
+  const fixes = [];
+  for (let i = 0; i < parts.length; i++) {
+    if (parts[i].type === "same") continue;
+    let del = "", add = "", j = i;
+    while (j < parts.length && (parts[j].type !== "same" || (!parts[j].text.trim() && parts[j + 1] && parts[j + 1].type !== "same"))) {
+      if (parts[j].type !== "add") del += parts[j].text;
+      if (parts[j].type !== "del") add += parts[j].text;
+      j++;
+    }
+    const preAll = parts[i - 1]?.type === "same" ? parts[i - 1].text : "";
+    const postAll = parts[j]?.type === "same" ? parts[j].text : "";
+    // try wide context first, then narrower, until the spot is unique in the current text
+    const tail = (t, n) => (t.match(/(\S+\s*){0,6}$/)?.[0] || "").split(/(?<=\s)(?=\S)/).slice(-n).join("");
+    const head = (t, n) => (t.match(/^(\s*\S+){0,6}/)?.[0] || "").split(/(?<=\S)(?=\s)/).slice(0, n).join("");
+    let fix = null;
+    for (const [a, z] of [[3, 3], [2, 2], [1, 1], [2, 0], [0, 2], [1, 0], [0, 1]]) {
+      const pre = a ? tail(preAll, a) : "", post = z ? head(postAll, z) : "";
+      const from = pre + del + post;
+      if (!from.trim() || (!pre && !post && del.length < 4)) continue;
+      const at = body.indexOf(from);
+      if (at >= 0 && body.indexOf(from, at + 1) < 0) { fix = { start: at + pre.length, end: at + pre.length + del.length, text: add }; break; }
+    }
+    fixes.push(fix);
+    i = j - 1;
+  }
+  return fixes;
+}
 function acceptText(card, text) {
   const r = locate(card);
+  if (!r && card.kind === "grammar") {
+    const fixes = correctionsThatFit(card.original, text, current.post.body);
+    const ok = fixes.filter(Boolean).sort((a, b) => b.start - a.start);
+    if (!ok.length) { toast("That passage changed too much since you asked. Run the tool again.", { error: true }); return; }
+    for (const f of ok) replaceRange(f.start, f.end, f.text);
+    updateCard(card, { done: true });
+    toast(ok.length === fixes.length ? "Corrections applied to your edited text" : `Applied ${ok.length} of ${fixes.length} corrections; the rest no longer fit your text`);
+    return;
+  }
   if (!r) { toast("That passage changed since you asked. Run the tool again.", { error: true }); return; }
   const before = current.post.body;
   // Spelling and grammar fixes are still the writer's words; only rewordings count.
@@ -1286,11 +1357,17 @@ function toggleCompare(btn, snap) {
   if (parts.every((p) => p.type === "same")) view.append(h("p", { class: "ok-text" }, "Identical to your current draft."));
   let run = 0;
   const flush = () => { if (run) { view.append(h("p", { class: "folded" }, `${run} unchanged paragraph${run === 1 ? "" : "s"}`)); run = 0; } };
+  const copyBtn = (text, label = "Copy this paragraph") => h("button", { class: "link-btn small-text", onclick: () => copyText(text, "Paragraph copied") }, label);
   for (const p of parts) {
-    if (p.type === "same") { run++; continue; }
+    if (p.type === "same" || p.type === "moved-to") { run++; continue; }
     flush();
-    if (p.type === "edit") view.append(h("p", { class: "diff" }, p.parts.map((w) => w.type === "same" ? w.text : h(w.type === "add" ? "ins" : "del", {}, w.text))));
-    else view.append(h("p", { class: "diff whole-" + p.type }, h(p.type === "add" ? "ins" : "del", {}, p.text)));
+    if (p.type === "edit") view.append(h("div", { class: "cmp-block" },
+      h("p", { class: "diff" }, p.parts.map((w) => w.type === "same" ? w.text : h(w.type === "add" ? "ins" : "del", {}, w.text))),
+      copyBtn(p.before, "Copy the saved version of this paragraph")));
+    else if (p.type === "moved-from") view.append(h("p", { class: "folded" }, `Moved: "${clip(p.text, 60)}"`));
+    else view.append(h("div", { class: "cmp-block" },
+      h("p", { class: "diff whole-" + p.type }, h(p.type === "add" ? "ins" : "del", {}, p.text)),
+      p.type === "del" ? copyBtn(p.text) : null));
   }
   flush();
   view.prepend(h("p", { class: "hint" }, h("del", {}, "struck"), " = only in this version, ", h("ins", {}, "highlighted"), " = added since."));
