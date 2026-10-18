@@ -65,7 +65,8 @@
   <div class="dlg wide dlg-scroll">
     <header class="dlg-head"><h2 id="exportTitle">Preview and export</h2><button class="icon-btn" id="exportClose" aria-label="Close">×</button></header>
     <div class="dlg-body">
-      <div class="export-meta">
+      <details class="export-meta" id="postDetails">
+        <summary><strong>Post details</strong> <span class="hint" id="detailsSummary"></span></summary>
         <label class="field"><span>Description <em>(link previews and search; optional)</em></span>
           <textarea id="exDesc" rows="2" autofocus placeholder="One sentence on what readers get from this post"></textarea>
           <span class="row between"><span class="hint" id="exDescCount"></span><button type="button" class="ghost small" id="exDescSuggest">Suggest from my draft</button></span></label>
@@ -73,7 +74,7 @@
         <details class="field"><summary>More front matter <em>(saved for all your posts)</em></summary>
           <textarea id="exExtra" rows="3" placeholder="categories: [engineering]&#10;image: /assets/{{slug}}.png&#10;permalink: /post/{{slug}}/" spellcheck="false"></textarea>
           <span class="hint">One YAML line each. {{slug}}, {{date}} and {{title}} are filled in for each post.</span></details>
-      </div>
+      </details>
       <section class="checks" id="exportChecks" aria-label="Before you publish"></section>
       <article class="reading" id="exportBody"></article>
     </div>
@@ -89,7 +90,7 @@
   <div class="dlg wide">
     <header class="dlg-head"><h2 id="versionsTitle">Versions</h2><button class="icon-btn" id="versionsClose" aria-label="Close">×</button></header>
     <div class="row nowrap"><input id="versionLabel" autofocus placeholder="Label for this version (optional)" aria-label="Version label"><button class="primary" id="saveVersion">Save current</button></div>
-    <p class="hint">Versions are also saved automatically: the first time you change an existing draft each day, and before any restore.</p>
+    <p class="hint">Versions are also saved automatically when you open a post, before you delete a big chunk, every 20 minutes of writing, and before any restore.</p>
     <ul class="versions" id="versionList"></ul>
   </div>
 </dialog>

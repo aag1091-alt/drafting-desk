@@ -128,7 +128,7 @@ function renderHome() {
       h("a", { class: "brand", href: "#/" }, h("span", { class: "brand-mark", "aria-hidden": "true" }), "Drafting Desk"),
       h("div", { class: "topbar-actions" }, modelButton())),
     h("main", { class: "home" + (posts.length ? " returning" : "") },
-      h("section", { class: "intro" },
+      posts.length ? null : h("section", { class: "intro" },
         h("h1", {}, "Your words. Your post."),
         h("p", { class: "lede" }, "A desk for writing blog posts yourself. Keep notes and research beside the draft. When you want help, the assistant fixes grammar, shows you where a sentence is unclear, and asks the questions that get you unstuck. It doesn't write the post for you."),
         h("p", { class: "privacy" }, "Everything stays in this browser. The assistant is optional; when you use it, only the text you ask about goes to the model provider you pick."),
@@ -158,6 +158,7 @@ function renderHome() {
           h("h2", {}, posts.length ? "Your posts" : "No posts yet"),
           h("div", { class: "row" },
             posts.length ? h("button", { class: "primary small", onclick: openNewPost }, "New post") : null,
+            posts.length ? h("button", { class: "link-btn small-text", onclick: loadSample }, "Open the example") : null,
             h("button", { class: "ghost small", onclick: () => $("#importFile").click() }, "Import"),
             posts.length ? h("button", { class: "ghost small", onclick: exportBackup }, "Back up all") : null)),
         posts.length > 4 ? h("div", { class: "row post-filters" },
@@ -316,6 +317,7 @@ function renderEditor(post) {
         h("a", { class: "brand", href: "#/", title: "All posts" }, h("span", { class: "brand-mark", "aria-hidden": "true" }), h("span", { class: "brand-text" }, "Drafting Desk")),
         h("a", { class: "back-link", href: "#/" }, "← All posts")),
       h("div", { class: "topbar-actions" },
+        h("button", { class: "ghost wide-only", id: "previewBtn", "aria-pressed": "false", onclick: togglePreview, title: "See the post as readers will" }, "Preview"),
         h("button", { class: "ghost wide-only", id: "focusBtn", onclick: toggleFocus, title: "Hide side panels" }, "Focus"),
         h("button", { class: "ghost wide-only", onclick: openVersions }, "Versions"),
         h("button", { class: "ghost wide-only", onclick: openVoice, title: "Describe how you write, so suggestions sound like you" }, "Your voice"),
@@ -323,6 +325,7 @@ function renderEditor(post) {
         h("details", { class: "more-menu narrow-only" },
           h("summary", { class: "ghost" }, "More"),
           h("div", { class: "more-list" },
+            h("button", { onclick: (e) => { e.target.closest("details").open = false; togglePreview(); } }, "Preview / Edit"),
             h("button", { onclick: (e) => { e.target.closest("details").open = false; openExport(); } }, "Export"),
             h("button", { onclick: (e) => { e.target.closest("details").open = false; openVersions(); } }, "Versions"),
             h("button", { onclick: (e) => { e.target.closest("details").open = false; openVoice(); } }, "Your voice"),
@@ -334,7 +337,8 @@ function renderEditor(post) {
       title,
       h("div", { class: "meta-row" }, status,
         h("span", { id: "wordCount" }),
-        h("label", { class: "goal", title: "Target length in words (optional)" }, "Goal",
+        h("button", { class: "link-btn small-text set-goal", hidden: !!post.goal, onclick: (e) => { e.target.hidden = true; const g = $(".goal"); g.hidden = false; g.querySelector("input").focus(); } }, "Set a word goal"),
+        h("label", { class: "goal", hidden: !post.goal, title: "Target length in words (optional)" }, "Goal",
           h("input", { type: "number", min: "0", step: "100", inputmode: "numeric", value: post.goal || "", placeholder: "—", "aria-label": "Word goal",
             oninput: (e) => { post.goal = Math.max(0, Number(e.target.value) || 0); updateStats(); scheduleSave(); } })), h("button", { id: "authorship", class: "link-btn plain", onclick: () => toast("Your words: roughly how much of the draft is your own wording. Accepted rewordings and outline headings lower it; grammar fixes don't.", { ms: 7000 }), title: "What does this mean?" }),
         h("button", { class: "ghost small", onclick: runTitles, title: "Title options built from phrases in your draft" }, "Title ideas"),
@@ -349,7 +353,6 @@ function renderEditor(post) {
             tool("Make it clearer", "2", () => runClarify(), "See what a reader might trip on in this sentence, with clearer wordings to choose from"),
             tool("I'm stuck", "3", () => runPromptMe(), "Questions that help you think of what to say next"),
             tool("Review draft", "4", () => runReview(), "An editor's notes on the whole draft, highlighted in your text")),
-          h("button", { class: "ghost small", id: "previewBtn", "aria-pressed": "false", onclick: togglePreview, title: "See the post as readers will" }, "Preview"),
           h("select", { id: "contents", class: "contents", "aria-label": "Jump to section", hidden: true, onchange: (e) => {
             const i = Number(e.target.value); e.target.selectedIndex = 0;
             if (i >= 0) { const line = current.post.body.indexOf("\n", i); selectInDraft(i, line < 0 ? current.post.body.length : line); }
@@ -380,7 +383,9 @@ function togglePreview() {
   const btn = $("#previewBtn"), wrap = $(".draft-wrap");
   const on = btn.getAttribute("aria-pressed") !== "true";
   btn.setAttribute("aria-pressed", String(on));
-  btn.textContent = on ? "Back to writing" : "Preview";
+  btn.textContent = on ? "Edit" : "Preview";
+  document.body.classList.toggle("previewing", on);
+  if (on) closeAnswering(false);
   $("#livePreview")?.remove();
   wrap.hidden = on;
   if (on) {
@@ -453,6 +458,7 @@ function onDraftInput(e) {
   autogrow(false);
   keepCaretVisible();
   updateHighlights();
+  if (answering && current.post.body.length - answering.start > 60) closeAnswering(true);
   clearTimeout(cardsTimer);
   if (cards.some((c) => !c.done && (c.kind === "grammar" || c.kind === "clarify"))) cardsTimer = setTimeout(renderCards, 600);
   clearTimeout(shrinkTimer);
@@ -645,7 +651,7 @@ function updateStats() {
   const chars = p.body.replace(/\s+/g, "").length;
   const mine = chars ? Math.max(0, Math.min(100, Math.round(100 * (1 - p.aiChars / chars)))) : 100;
   const a = $("#authorship");
-  if (a) { a.textContent = chars ? `${mine}% your words` : ""; a.className = "link-btn plain" + (mine < 80 ? " warn-text" : ""); }
+  if (a) { a.textContent = chars && mine < 100 ? `${mine}% your words` : ""; a.className = "link-btn plain" + (mine < 80 ? " warn-text" : ""); }
 }
 
 // ---------- scope: what the assistant will act on ----------
@@ -761,7 +767,7 @@ function noteItems() {
       onblur: (e) => { const t = e.target.innerText.trim(); if (t !== n.text) { n.text = t; scheduleSave(); } } }, n.text),
     h("div", { class: "note-actions" },
       n.kind === "note" ? h("button", { class: "link-btn", onmousedown: (e) => e.preventDefault(), onclick: () => insertAtCursor(n.text), title: "Insert this note's text at your cursor in the draft" }, "Insert") : null,
-      n.kind === "question" ? h("button", { class: "link-btn", onmousedown: (e) => e.preventDefault(), onclick: () => answerQuestion(n.text), title: "Start a new paragraph in the draft to answer this" }, "Answer in draft") : null,
+      n.kind === "question" ? (n.answered ? h("span", { class: "ok-text small-text" }, "Answered ✓") : h("button", { class: "link-btn", onmousedown: (e) => e.preventDefault(), onclick: () => answerQuestion(n.text), title: "Start a new paragraph in the draft to answer this" }, "Answer in draft")) : null,
       n.kind === "source" && n.url ? h("button", { class: "link-btn", onmousedown: (e) => e.preventDefault(), onclick: () => insertLink(n), title: "Link the selected words to this source, or insert the source's title as a link" }, "Insert link") : null,
       h("span", { class: "note-date" }, timeAgo(n.created)),
       h("button", { class: "link-btn danger", onclick: () => { removeNote(n.id); } }, "Delete"))));
@@ -832,13 +838,23 @@ function answerQuestion(q) {
   lastSel = { start: pos, end: pos };
   showAnswering(q);
 }
+let answering = null;
 function showAnswering(q) {
   $("#answering")?.remove();
+  answering = { q, start: current.post.body.length };
   const bar = h("div", { class: "answering", id: "answering", role: "status" },
     h("span", {}, h("strong", {}, "Answering: "), q),
-    h("button", { class: "link-btn", onclick: () => bar.remove() }, "Done"));
+    h("button", { class: "link-btn", onclick: () => closeAnswering(true) }, "Done"));
   $(".draft-wrap").before(bar);
   draft().focus();
+}
+function closeAnswering(done) {
+  $("#answering")?.remove();
+  if (done && answering) {
+    const n = current.post.notes.find((x) => x.kind === "question" && x.text === answering.q);
+    if (n && !n.answered) { n.answered = true; scheduleSave(); renderNotes(); }
+  }
+  answering = null;
 }
 function insertLink(n) {
   const ta = draft();
@@ -1088,19 +1104,14 @@ function cardView(c) {
   if (c.kind === "outline") {
     el.append(h("ol", { class: "outline" }, c.result.map((o) => h("li", {}, h("strong", {}, o.heading), o.covers ? h("span", { class: "hint" }, " " + o.covers) : null))));
     el.append(h("div", { class: "row end" }, c.done ? h("span", { class: "ok-text" }, "Inserted") : h("button", { class: "ghost small", onclick: () => {
-      const body = current.post.body;
-      let at = body.indexOf("\n\n", lastSel.end);
-      at = at < 0 ? body.length : at;
-      if (!body.trim()) at = 0;
-      const before = body.slice(0, at).replace(/\s+$/, "");
-      const after = body.slice(at).replace(/^\s+/, "");
+      const body = current.post.body.replace(/^\s+/, "");
       const skel = c.result.map((o) => `## ${o.heading}`).join("\n\n");
-      replaceRange(0, body.length, (before ? before + "\n\n" : "") + skel + (after ? "\n\n" + after : "\n"));
-      addNote(store.blankNote("note", { text: "Outline:\n" + c.result.map((o) => `- ${o.heading}${o.covers ? ": " + o.covers : ""}`).join("\n") }));
+      replaceRange(0, current.post.body.length, skel + (body ? "\n\n" + body : "\n"));
+      selectInDraft(skel.indexOf("\n") < 0 ? skel.length : skel.indexOf("\n"), skel.indexOf("\n") < 0 ? skel.length : skel.indexOf("\n"));
       current.post.aiChars += addedChars("", c.result.map((o) => o.heading).join(" "));
       updateStats();
       updateCard(c, { done: true });
-    } }, "Insert headings at cursor")));
+    } }, current.post.body.trim() ? "Add these headings at the top" : "Use as the skeleton of my draft")));
   }
   return el;
 }
@@ -1151,6 +1162,8 @@ function acceptText(card, text) {
   // Spelling and grammar fixes are still the writer's words; only rewordings count.
   const added = card.kind === "grammar" ? 0 : addedChars(card.original, text);
   replaceRange(r.start, r.end, text);
+  // when the last fix from a whole-draft check is applied, the draft counts as checked
+  if (card.batch && !cards.some((c) => c !== card && c.batch === card.batch && !c.done && c.result !== c.original)) current.post.grammarCheckedBody = current.post.body;
   current.post.aiChars += added;
   updateStats();
   updateCard(card, { done: true });
@@ -1179,6 +1192,7 @@ function refreshModelButton() {
   document.querySelectorAll(".model-btn").forEach((b) => b.replaceWith(modelButton()));
 }
 async function runTool(card, fn) {
+  { const st = store.getSettings(); if (!st.guideDone) { st.guideDone = true; store.saveSettings(st); $("#guide")?.remove(); } }
   card.ctl = new AbortController();
   card.pending = true;
   card.started = Date.now();
@@ -1250,12 +1264,18 @@ function runGrammarAll() {
       updateCard(holder, { progress: `Checking paragraph ${i + 1} of ${paras.length}…` });
       const reply = await complete({ ...P.grammarPrompt(post, p.text), signal, temperature: 0, maxTokens: Math.min(4000, 300 + p.text.length) });
       const out = parseCorrected(reply, p.text);
-      if (out !== p.text) {
+      if (out === p.text) continue;
+      {
         changed++;
         const card = { kind: "grammar", start: p.start, end: p.end, original: p.text, scopeLabel: `paragraph ${i + 1}`, result: out, id: store.newId(), at: Date.now(), batch: holder.id, postId: holder.postId };
         const list = current && holder.postId === current.post.id ? cards : liveCards.get(holder.postId);
         if (list) list.splice(list.indexOf(holder) + 1, 0, card);
       }
+    }
+    if (!signal.aborted) {
+      post.grammarCheckedBody = changed ? null : post.body;
+      post.grammarBatch = holder.id;
+      store.savePost(post);
     }
     return changed;
   });
@@ -1435,7 +1455,10 @@ function exportChecks() {
   if (/\b(TODO|TK|FIXME)\b/.test(body)) out.push(["warn", "The draft still has TODO/TK markers."]);
   const openNotes = cards.filter((c) => c.kind === "review" && !c.pending).flatMap((c) => (c.result || []).filter((_, i) => !c.checked?.[i])).length;
   if (openNotes) out.push(["info", `${openNotes} review note${openNotes === 1 ? "" : "s"} not ticked off yet.`]);
-  const checked = cards.some((c) => c.kind === "grammar" && c.scopeLabel === "whole draft" && !c.pending && !c.error);
+  const checked = p.grammarCheckedBody === body;
+  const openFixes = cards.filter((c) => c.kind === "grammar" && c.batch && !c.done && c.result !== c.original).length;
+  if (openFixes) out.push(["warn", `${openFixes} grammar fix${openFixes === 1 ? "" : "es"} from the last check not applied yet.`]);
+  if (!checked && !openFixes) out.push(["warn", p.grammarCheckedBody ? "You've edited since the last grammar check." : "Grammar hasn't been checked yet."]);
   return { out, checked };
 }
 function renderExportChecks() {
@@ -1443,7 +1466,7 @@ function renderExportChecks() {
   const box = $("#exportChecks");
   box.replaceChildren(
     h("h3", {}, "Before you publish"),
-    out.length ? h("ul", {}, out.map(([k, t]) => h("li", { class: k }, t))) : h("p", { class: "ok-text" }, "Nothing obvious left to fix."),
+    out.length ? h("ul", {}, out.map(([k, t]) => h("li", { class: k }, t))) : h("p", { class: "ok-text" }, "Grammar checked and nothing obvious left to fix."),
     h("div", { class: "row" },
       checked ? h("span", { class: "ok-text small-text" }, "Whole draft grammar-checked ✓") : null,
       isReady() ? h("button", { class: "ghost small", onclick: () => { $("#exportDlg").close(); runGrammarAll(); } }, checked ? "Check grammar again" : "Check grammar of the whole draft") : null));
@@ -1476,8 +1499,15 @@ async function saveIntoFolder() {
     if (e.name !== "AbortError") toast(e.message || "Couldn't save to that folder.", { error: true });
   }
 }
+function detailsSummary() {
+  const p = current.post;
+  const bits = [p.description ? "description" : "", p.tags ? `tags: ${clip(p.tags, 40)}` : "", store.getSettings().extraFrontMatter ? "custom front matter" : ""].filter(Boolean);
+  $("#detailsSummary").textContent = bits.length ? "· " + bits.join(" · ") : "· description, tags (optional)";
+}
 function openExport() {
   flushSave();
+  detailsSummary();
+  $("#postDetails").open = !current.post.description;
   renderExportChecks();
   renderFolderRow();
   $("#exExtra").value = store.getSettings().extraFrontMatter || "";
@@ -1495,7 +1525,7 @@ function descCount() {
   el.textContent = n ? `${n} characters${n < 70 ? " · a bit short" : n > 170 ? " · may be cut off in previews" : ""}` : "";
 }
 $("#exDesc").addEventListener("input", (e) => { current.post.description = e.target.value.replace(/\n/g, " "); descCount(); scheduleSave(); });
-$("#exTags").addEventListener("input", (e) => { current.post.tags = e.target.value; scheduleSave(); });
+$("#exTags").addEventListener("input", (e) => { current.post.tags = e.target.value; scheduleSave(); detailsSummary(); });
 $("#exDescSuggest").addEventListener("click", async () => {
   if (!requireModel()) return;
   if (wordCount(current.post.body) < 80) { toast("Write a bit more first."); return; }

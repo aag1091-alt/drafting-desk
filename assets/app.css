@@ -378,10 +378,19 @@ body.focus .guide { display: none; }
 .cmp-block { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; }
 .cmp-block .diff { margin: 0; }
 
-.answering { position: sticky; top: 52px; z-index: 3; box-shadow: var(--shadow); }
 .stale { color: var(--warn); margin: 0; }
 
 #exExtra { font: 13px/1.5 var(--mono); margin-top: 6px; }
 .live-preview { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 28px clamp(18px, 4vw, 48px); box-shadow: var(--shadow); max-height: none; overflow: visible; }
 .live-preview h1 { font: 600 30px/1.2 var(--serif); margin: 0 0 0.6em; }
 #previewBtn[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+
+body.previewing .toolbar .tools, body.previewing .scope, body.previewing #contents, body.previewing .notes-toggle, body.previewing .guide { display: none; }
+.export-meta > summary { cursor: pointer; padding: 4px 0; }
+.export-meta[open] > summary { margin-bottom: 8px; }
+.export-meta { display: block; }
+.export-meta > label, .export-meta > details { margin-bottom: 10px; display: flex; }
+@media (max-width: 760px) {
+  .toolbar { flex-wrap: nowrap; overflow-x: auto; -webkit-mask-image: linear-gradient(90deg, #000 85%, transparent); mask-image: linear-gradient(90deg, #000 85%, transparent); padding-right: 24px; }
+  .toolbar .tools { flex-wrap: nowrap; }
+}
