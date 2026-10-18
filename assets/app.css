@@ -244,3 +244,12 @@ dialog:has(.narrow) { width: min(420px, calc(100vw - 32px)); }
   #toast { transition: opacity 0.2s, transform 0.2s; }
   .tab, .ghost, .provider { transition: border-color 0.15s, background 0.15s, color 0.15s; }
 }
+
+.goal { display: inline-flex; gap: 6px; align-items: center; }
+.goal input { width: 70px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); padding: 2px 6px; font-size: 13px; font-variant-numeric: tabular-nums; }
+.contents { font-size: 13px; padding: 4px 6px; max-width: 220px; }
+
+.diff del + ins, .diff ins + del { margin-left: 3px; }
+.capture { display: flex; flex-direction: column; gap: 8px; }
+.capture-label { font-size: 14px; color: var(--muted); }
+.capture input { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); padding: 8px 10px; }

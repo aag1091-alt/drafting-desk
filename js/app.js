@@ -112,6 +112,23 @@ function renderHome() {
         h("div", { class: "row" },
           h("button", { class: "primary", onclick: openNewPost }, "New post"),
           h("button", { class: "ghost", onclick: loadSample }, "Open the example"))),
+      h("form", { class: "capture", onsubmit: (e) => {
+          e.preventDefault();
+          const box = $("#ideaBox");
+          const text = box.value.trim();
+          if (!text) return;
+          const first = text.split("\n")[0];
+          const post = store.blankPost(clip(first.replace(/^#+\s*/, ""), 70));
+          post.notes.push(store.blankNote("note", { text }));
+          store.savePost(post);
+          box.value = "";
+          renderHome();
+          toast("Idea saved", { action: { label: "Open", run: () => (location.hash = `#/p/${post.id}`) } });
+        } },
+        h("label", { for: "ideaBox", class: "capture-label" }, "Got an idea? Jot it down. It becomes a post you can come back to."),
+        h("div", { class: "row nowrap" },
+          h("input", { id: "ideaBox", placeholder: "e.g. Why config is a grammar problem, not a reasoning one", autocomplete: "off" }),
+          h("button", { class: "ghost" }, "Save idea"))),
       h("section", { class: "posts" },
         h("div", { class: "row between" },
           h("h2", {}, posts.length ? "Your posts" : "No posts yet"),
@@ -206,10 +223,16 @@ function addSnapshot(label) {
   if (p.snapshots.length > 40) p.snapshots.splice(0, p.snapshots.length - 40);
 }
 
+function notesOpen() {
+  const s = store.getSettings();
+  if (window.matchMedia("(max-width: 1100px)").matches) return !!sessionNotesOpen;
+  return !!s.notesOpen;
+}
+let sessionNotesOpen = false;
 function renderEditor(post) {
   current = { post, versionedToday: false };
   document.title = `${post.title} · Drafting Desk`;
-  const s = store.getSettings();
+  const s = { ...store.getSettings(), notesOpen: notesOpen() };
 
   const title = h("input", { class: "post-title-input", "aria-label": "Post title", value: post.title,
     oninput: (e) => { post.title = e.target.value; document.title = `${post.title} · Drafting Desk`; scheduleSave(); } });
@@ -237,24 +260,32 @@ function renderEditor(post) {
     h("div", { class: "editor-head" },
       title,
       h("div", { class: "meta-row" }, status,
-        h("span", { id: "wordCount" }), h("span", { id: "authorship", title: "Share of the draft you typed yourself, versus text inserted by accepting suggestions (approximate)" }),
+        h("span", { id: "wordCount" }),
+        h("label", { class: "goal", title: "Target length in words (optional)" }, "Goal",
+          h("input", { type: "number", min: "0", step: "100", inputmode: "numeric", value: post.goal || "", placeholder: "—", "aria-label": "Word goal",
+            oninput: (e) => { post.goal = Math.max(0, Number(e.target.value) || 0); updateStats(); scheduleSave(); } })), h("span", { id: "authorship", title: "Share of the draft you typed yourself, versus text inserted by accepting suggestions (approximate)" }),
         h("span", { id: "saveState", class: "save-state" }, "Saved"))),
     h("main", { class: "workspace" + (s.notesOpen ? "" : " notes-closed") + (document.body.classList.contains("focus") ? "" : ""), id: "workspace" },
       notesPanel(),
       h("section", { class: "draft-col", "aria-label": "Draft" },
         h("div", { class: "toolbar", role: "toolbar", "aria-label": "Assistant tools" },
-          h("button", { class: "ghost small notes-toggle", onclick: toggleNotes, "aria-expanded": String(!!s.notesOpen) }, s.notesOpen ? "Hide notes" : "Notes"),
+          h("button", { class: "ghost small notes-toggle", onclick: toggleNotes, "aria-expanded": String(!!s.notesOpen) }, s.notesOpen ? "Hide notes" : `Notes (${post.notes.length})`),
           h("div", { class: "tools" },
-            tool("Fix grammar", "1", () => runGrammar(), "Correct spelling and grammar in the selection or this paragraph"),
+            tool("Fix grammar", "1", (e) => (e.shiftKey ? runGrammarAll() : runGrammar()), "Correct spelling and grammar in the selection or this paragraph. Shift-click (or add Shift) for the whole draft"),
             tool("Clarify", "2", () => runClarify(), "Show what's unclear in the selection or this sentence, with options"),
             tool("Prompt me", "3", () => runPromptMe(), "Questions to help you think of what to say next"),
             tool("Review", "4", () => runReview(), "Editor's margin notes on the whole draft")),
+          h("select", { id: "contents", class: "contents", "aria-label": "Jump to section", hidden: true, onchange: (e) => {
+            const i = Number(e.target.value); e.target.selectedIndex = 0;
+            if (i >= 0) { const line = current.post.body.indexOf("\n", i); selectInDraft(i, line < 0 ? current.post.body.length : line); }
+          } }),
           h("span", { class: "scope", id: "scope" })),
         ta),
       assistantPanel()));
   autogrow();
   updateStats();
   updateScope();
+  updateContents();
   renderCards();
   if (!post.body) ta.focus();
 }
@@ -264,15 +295,21 @@ function onDraftInput(e) {
   if (!current.versionedToday) { autoVersion(); current.versionedToday = true; }
   p.body = e.target.value;
   if (p.status === "Idea" && wordCount(p.body) > 30) { p.status = "Drafting"; const sel = $(".status-select"); if (sel) sel.value = "Drafting"; }
-  autogrow();
+  autogrow(false);
+  keepCaretVisible();
+  clearTimeout(shrinkTimer);
+  shrinkTimer = setTimeout(() => autogrow(true), 800);
   updateStats();
+  updateContents();
   scheduleSave();
 }
 function onDraftKey(e) {
   const mod = isMac ? e.metaKey : e.ctrlKey;
   if (mod && e.altKey && ["1", "2", "3", "4"].includes(e.code.replace("Digit", ""))) {
     e.preventDefault();
-    ({ 1: runGrammar, 2: runClarify, 3: runPromptMe, 4: runReview })[e.code.replace("Digit", "")]();
+    const k = e.code.replace("Digit", "");
+    if (k === "1" && e.shiftKey) runGrammarAll();
+    else ({ 1: runGrammar, 2: runClarify, 3: runPromptMe, 4: runReview })[k]();
   }
   if (mod && e.key.toLowerCase() === "s") { e.preventDefault(); flushSave(); setSaveState("Saved"); }
 }
@@ -282,21 +319,74 @@ function rememberSel() {
   lastSel = { start: ta.selectionStart, end: ta.selectionEnd };
   updateScope();
 }
-function autogrow() {
+function autogrow(full = true) {
   const ta = draft();
   if (!ta) return;
+  const min = window.innerHeight * 0.6;
+  if (!full) {
+    // while typing, only grow: no collapse, so the page never jumps
+    if (ta.scrollHeight > ta.clientHeight) ta.style.height = ta.scrollHeight + 4 + "px";
+    return;
+  }
   const y = window.scrollY;
   ta.style.height = "auto";
-  ta.style.height = Math.max(ta.scrollHeight + 4, window.innerHeight * 0.6) + "px";
+  ta.style.height = Math.max(ta.scrollHeight + 4, min) + "px";
   window.scrollTo(0, y);
+}
+let shrinkTimer;
+let caretFrame = 0;
+/** The draft grows instead of scrolling, so keep the line being typed on screen ourselves. */
+function keepCaretVisible() {
+  cancelAnimationFrame(caretFrame);
+  caretFrame = requestAnimationFrame(() => {
+    const ta = draft();
+    if (!ta || document.activeElement !== ta) return;
+    const top = caretOffset(ta, ta.selectionEnd);
+    const y = ta.getBoundingClientRect().top + top;
+    const lh = parseFloat(getComputedStyle(ta).lineHeight) || 30;
+    const bottomRoom = window.innerHeight - 48;
+    if (y + lh > bottomRoom) window.scrollBy(0, y + lh - bottomRoom);
+    else if (y < 64) window.scrollBy(0, y - 64);
+  });
+}
+function caretOffset(ta, index) {
+  const cs = getComputedStyle(ta);
+  const mirror = h("div", { class: "draft mirror" });
+  mirror.style.width = ta.clientWidth + "px";
+  mirror.style.font = cs.font;
+  mirror.style.padding = cs.padding;
+  mirror.style.lineHeight = cs.lineHeight;
+  mirror.style.letterSpacing = cs.letterSpacing;
+  mirror.textContent = ta.value.slice(0, index);
+  const mark = h("span", {}, "\u200b");
+  mirror.append(mark);
+  document.body.append(mirror);
+  const top = mark.offsetTop;
+  mirror.remove();
+  return top;
 }
 window.addEventListener("resize", autogrow);
 
+function updateContents() {
+  const sel = $("#contents");
+  if (!sel) return;
+  const heads = [...current.post.body.matchAll(/^(#{1,4})\s+(.+)$/gm)];
+  sel.hidden = heads.length < 2;
+  const sig = heads.map((m) => m.index + m[0]).join("|");
+  if (sel.dataset.sig === sig) return;
+  sel.dataset.sig = sig;
+  sel.replaceChildren(h("option", { value: "-1" }, "Jump to…"),
+    ...heads.map((m) => h("option", { value: String(m.index) }, (m[1].length > 2 ? "  ".repeat(m[1].length - 2) : "") + clip(m[2], 48))));
+}
 function updateStats() {
   const p = current.post;
   const words = wordCount(p.body);
   const wc = $("#wordCount");
-  if (wc) wc.textContent = `${words.toLocaleString()} words · ${Math.max(1, Math.round(words / 230))} min read`;
+  if (wc) {
+    wc.textContent = p.goal ? `${words.toLocaleString()} / ${p.goal.toLocaleString()} words` : `${words.toLocaleString()} words`;
+    if (words) wc.textContent += ` · ${Math.max(1, Math.round(words / 230))} min read`;
+    wc.classList.toggle("ok-text", !!p.goal && words >= p.goal);
+  }
   const chars = p.body.replace(/\s+/g, "").length;
   const mine = chars ? Math.max(0, Math.min(100, Math.round(100 * (1 - p.aiChars / chars)))) : 100;
   const a = $("#authorship");
@@ -373,19 +463,7 @@ function selectInDraft(start, end) {
   ta.setSelectionRange(start, end);
   lastSel = { start, end };
   updateScope();
-  // scroll the selection into view: measure with a mirror element
-  const mirror = h("div", { class: "draft mirror" });
-  const cs = getComputedStyle(ta);
-  mirror.style.width = ta.clientWidth + "px";
-  mirror.style.font = cs.font;
-  mirror.style.padding = cs.padding;
-  mirror.style.lineHeight = cs.lineHeight;
-  mirror.textContent = ta.value.slice(0, start);
-  const mark = h("span", {}, "|");
-  mirror.append(mark);
-  document.body.append(mirror);
-  const top = mark.offsetTop;
-  mirror.remove();
+  const top = caretOffset(ta, start);
   const y = ta.getBoundingClientRect().top + window.scrollY + top - window.innerHeight / 3;
   window.scrollTo({ top: Math.max(0, y), behavior: "smooth" });
 }
@@ -425,8 +503,8 @@ function noteItems() {
     h("div", { class: "note-text", contenteditable: "true", spellcheck: "true", "aria-label": "Edit note",
       onblur: (e) => { const t = e.target.innerText.trim(); if (t !== n.text) { n.text = t; scheduleSave(); } } }, n.text),
     h("div", { class: "note-actions" },
-      h("button", { class: "link-btn", onmousedown: (e) => e.preventDefault(), onclick: () => insertAtCursor(n.kind === "source" && n.url ? `${n.text}` : n.text), title: "Insert this note's text at your cursor in the draft" }, "Insert"),
-      n.kind === "source" && n.url ? h("button", { class: "link-btn", onmousedown: (e) => e.preventDefault(), onclick: () => insertAtCursor(`[${n.title || "source"}](${n.url})`), title: "Insert a Markdown link to this source" }, "Insert link") : null,
+      n.kind !== "source" ? h("button", { class: "link-btn", onmousedown: (e) => e.preventDefault(), onclick: () => insertAtCursor(n.text), title: "Insert this note's text at your cursor in the draft" }, "Insert") : null,
+      n.kind === "source" && n.url ? h("button", { class: "link-btn", onmousedown: (e) => e.preventDefault(), onclick: () => insertLink(n), title: "Link the selected words to this source, or insert the source's title as a link" }, "Insert link") : null,
       h("span", { class: "note-date" }, timeAgo(n.created)),
       h("button", { class: "link-btn danger", onclick: () => { removeNote(n.id); } }, "Delete"))));
 }
@@ -443,6 +521,8 @@ function addNote(note) {
   current.post.notes.push(note);
   scheduleSave();
   renderNotes();
+  const b = $(".notes-toggle");
+  if (b && !notesOpen()) b.textContent = `Notes (${current.post.notes.length})`;
 }
 function removeNote(id) {
   const p = current.post;
@@ -480,6 +560,13 @@ async function summarizeSource() {
   } catch (e) { $("#srcText").value = text; toast(e.message, { error: true }); }
   finally { btn.disabled = false; btn.textContent = "Summarize excerpt"; }
 }
+function insertLink(n) {
+  const ta = draft();
+  const { start, end } = lastSel;
+  const chosen = ta.value.slice(start, end).trim();
+  if (chosen) replaceRange(start, end, `[${chosen}](${n.url})`);
+  else insertAtCursor(`[${n.title || n.url}](${n.url})`);
+}
 function insertAtCursor(text) {
   const ta = draft();
   const { start, end } = lastSel;
@@ -488,13 +575,13 @@ function insertAtCursor(text) {
   replaceRange(start, end, pad + text);
 }
 function toggleNotes() {
-  const s = store.getSettings();
-  s.notesOpen = !s.notesOpen;
-  store.saveSettings(s);
-  $("#workspace").classList.toggle("notes-closed", !s.notesOpen);
+  const open = !notesOpen();
+  if (window.matchMedia("(max-width: 1100px)").matches) sessionNotesOpen = open;
+  else { const s = store.getSettings(); s.notesOpen = open; store.saveSettings(s); }
+  $("#workspace").classList.toggle("notes-closed", !open);
   const b = $(".notes-toggle");
-  b.textContent = s.notesOpen ? "Hide notes" : "Notes";
-  b.setAttribute("aria-expanded", String(s.notesOpen));
+  b.textContent = open ? "Hide notes" : `Notes (${current.post.notes.length})`;
+  b.setAttribute("aria-expanded", String(open));
   autogrow();
 }
 function toggleFocus() {
@@ -556,7 +643,7 @@ function cardView(c) {
     h("span", { class: "card-kind" }, KIND_LABEL[c.kind]),
     c.scopeLabel ? h("span", { class: "card-scope" }, c.scopeLabel) : null,
     h("button", { class: "icon-btn small", "aria-label": "Dismiss", title: "Dismiss", onclick: () => { c.ctl?.abort(); dropCard(c); } }, "×"));
-  const el = h("article", { class: "card " + c.kind + (c.done ? " done" : "") }, head);
+  const el = h("article", { class: "card " + c.kind + (c.done ? " done" : ""), "data-card": c.id }, head);
   if (c.original && c.kind !== "review") {
     el.append(h("button", { class: "quote", title: "Show in draft", onclick: () => { const r = locate(c); if (r) selectInDraft(r.start, r.end); else toast("That text has changed in your draft."); } }, clip(c.original, 160)));
   }
@@ -567,8 +654,16 @@ function cardView(c) {
   }
   if (c.error) { el.append(h("p", { class: "status err" }, c.error)); return el; }
 
+  if (c.kind === "grammar" && c.scopeLabel === "whole draft") {
+    el.append(h("p", { class: c.result ? "" : "ok-text" }, c.result ? `${c.result} paragraph${c.result === 1 ? "" : "s"} with fixes below. Accept the ones you want.` : "No grammar or spelling issues found in the draft."));
+    return el;
+  }
   if (c.kind === "grammar") {
-    if (c.result === c.original) { el.append(h("p", { class: "ok-text" }, "No grammar or spelling issues found.")); return el; }
+    if (c.result === c.original) {
+      el.append(h("p", { class: "ok-text" }, "No grammar or spelling issues found."));
+      if (c.scopeLabel !== "whole draft") el.append(h("button", { class: "link-btn", onclick: () => runGrammarAll() }, "Check the whole draft"));
+      return el;
+    }
     const parts = wordDiff(c.original, c.result);
     el.append(h("p", { class: "diff" }, parts.map((p) => p.type === "same" ? p.text : h(p.type === "add" ? "ins" : "del", {}, p.text))));
     el.append(h("div", { class: "row between" },
@@ -635,6 +730,14 @@ function acceptText(card, text) {
   updateCard(card, { done: true });
 }
 
+function announceIfHidden(card) {
+  const el = document.querySelector(`[data-card="${card.id}"]`);
+  if (!el) return;
+  const r = el.getBoundingClientRect();
+  if (r.top > window.innerHeight || r.bottom < 0) {
+    toast(`${KIND_LABEL[card.kind]} is ready`, { action: { label: "View", run: () => el.scrollIntoView({ behavior: "smooth", block: "start" }) } });
+  }
+}
 async function runTool(card, fn) {
   card.ctl = new AbortController();
   card.pending = true;
@@ -642,6 +745,7 @@ async function runTool(card, fn) {
   try {
     const result = await fn(card.ctl.signal);
     updateCard(card, { pending: false, result });
+    announceIfHidden(card);
   } catch (e) {
     if (e.cancelled) dropCard(card);
     else updateCard(card, { pending: false, error: e.message });
@@ -660,6 +764,33 @@ function runGrammar() {
     out = out.replace(/^\s*<text>\s*|\s*<\/text>\s*$/g, "");
     // keep the writer's surrounding whitespace exactly
     return out.trim() === original.trim() ? original : out.trim();
+  });
+}
+function runGrammarAll() {
+  if (!requireModel()) return;
+  const body = current.post.body;
+  if (!body.trim()) { toast("Write something first."); return; }
+  // paragraph ranges
+  const paras = [];
+  const re = /[^\n](?:[^\n]|\n(?!\n))*/g;
+  let m;
+  while ((m = re.exec(body))) if (m[0].trim() && !/^#{1,6}\s/.test(m[0]) && !/^```/.test(m[0])) paras.push({ start: m.index, end: m.index + m[0].length, text: m[0] });
+  const holder = { kind: "grammar", scopeLabel: "whole draft", original: "", progress: `Checking ${paras.length} paragraphs…` };
+  runTool(holder, async (signal) => {
+    let changed = 0;
+    for (let i = 0; i < paras.length; i++) {
+      if (signal.aborted) break;
+      const p = paras[i];
+      updateCard(holder, { progress: `Checking paragraph ${i + 1} of ${paras.length}…` });
+      let out = await complete({ ...P.grammarPrompt(current.post, p.text), signal, maxTokens: Math.min(4000, 200 + p.text.length) });
+      out = out.replace(/^\s*<text>\s*|\s*<\/text>\s*$/g, "").trim();
+      if (out && out !== p.text.trim()) {
+        changed++;
+        const card = { kind: "grammar", start: p.start, end: p.end, original: p.text, scopeLabel: `paragraph ${i + 1}`, result: out, id: store.newId() };
+        cards.splice(cards.indexOf(holder) + 1, 0, card);
+      }
+    }
+    return changed;
   });
 }
 function runClarify() {
