@@ -3,6 +3,7 @@ import { PROVIDERS, startOpenRouterLogin, finishOpenRouterLogin, isReady, listMo
 import * as P from "./prompts.js?v=__V__";
 import { renderMarkdown, postToMarkdown, slugify, wordCount, parseMarkdownPost } from "./markdown.js?v=__V__";
 import { wordDiff, addedChars, changeCount, paraDiff } from "./diff.js?v=__V__";
+import * as folder from "./folder.js?v=__V__";
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const app = $("#app");
@@ -348,6 +349,7 @@ function renderEditor(post) {
             tool("Make it clearer", "2", () => runClarify(), "See what a reader might trip on in this sentence, with clearer wordings to choose from"),
             tool("I'm stuck", "3", () => runPromptMe(), "Questions that help you think of what to say next"),
             tool("Review draft", "4", () => runReview(), "An editor's notes on the whole draft, highlighted in your text")),
+          h("button", { class: "ghost small", id: "previewBtn", "aria-pressed": "false", onclick: togglePreview, title: "See the post as readers will" }, "Preview"),
           h("select", { id: "contents", class: "contents", "aria-label": "Jump to section", hidden: true, onchange: (e) => {
             const i = Number(e.target.value); e.target.selectedIndex = 0;
             if (i >= 0) { const line = current.post.body.indexOf("\n", i); selectInDraft(i, line < 0 ? current.post.body.length : line); }
@@ -373,6 +375,19 @@ function growTitle(el) {
   if (!el) return;
   el.style.height = "auto";
   el.style.height = el.scrollHeight + "px";
+}
+function togglePreview() {
+  const btn = $("#previewBtn"), wrap = $(".draft-wrap");
+  const on = btn.getAttribute("aria-pressed") !== "true";
+  btn.setAttribute("aria-pressed", String(on));
+  btn.textContent = on ? "Back to writing" : "Preview";
+  $("#livePreview")?.remove();
+  wrap.hidden = on;
+  if (on) {
+    const art = h("article", { class: "reading live-preview", id: "livePreview" });
+    art.innerHTML = renderMarkdown(`# ${current.post.title}\n\n${current.post.body}`);
+    wrap.after(art);
+  } else { autogrow(); draft().focus(); }
 }
 function guideStrip() {
   const s = store.getSettings();
@@ -1433,9 +1448,39 @@ function renderExportChecks() {
       checked ? h("span", { class: "ok-text small-text" }, "Whole draft grammar-checked ✓") : null,
       isReady() ? h("button", { class: "ghost small", onclick: () => { $("#exportDlg").close(); runGrammarAll(); } }, checked ? "Check grammar again" : "Check grammar of the whole draft") : null));
 }
+function exportFilename(p) {
+  return p.fileName || `${new Date().toISOString().slice(0, 10)}-${slugify(p.title)}.md`;
+}
+function exportText() {
+  return postToMarkdown(current.post, { frontMatter: $("#frontMatter").checked, extra: store.getSettings().extraFrontMatter || "" });
+}
+async function renderFolderRow() {
+  const row = $("#folderRow");
+  if (!folder.supported) { row.replaceChildren(); return; }
+  const name = await folder.folderName();
+  $("#downloadMd").className = name ? "ghost" : "primary";
+  row.replaceChildren(...[
+    name ? h("button", { class: "link-btn small-text", title: "Pick a different folder", onclick: async () => { try { await folder.chooseFolder(); renderFolderRow(); } catch {} } }, "change folder") : null,
+    h("button", { class: name ? "primary" : "ghost", onclick: saveIntoFolder, title: `Write ${exportFilename(current.post)} straight into your blog's _posts or _drafts folder` }, name ? `Save to "${name}"` : "Save into a folder…")].filter(Boolean));
+}
+async function saveIntoFolder() {
+  try {
+    const p = current.post;
+    const name = await folder.saveToFolder(exportFilename(p), exportText());
+    p.fileName = exportFilename(p);
+    scheduleSave();
+    toast(`Saved ${p.fileName} to "${name}"`);
+    offerPublished();
+    renderFolderRow();
+  } catch (e) {
+    if (e.name !== "AbortError") toast(e.message || "Couldn't save to that folder.", { error: true });
+  }
+}
 function openExport() {
   flushSave();
   renderExportChecks();
+  renderFolderRow();
+  $("#exExtra").value = store.getSettings().extraFrontMatter || "";
   $("#markPublished").hidden = true;
   $("#exDesc").value = current.post.description || "";
   descCount();
@@ -1463,7 +1508,8 @@ $("#exDescSuggest").addEventListener("click", async () => {
   } catch (e) { box.value = before; toast(e.message, { error: true }); }
   finally { btn.disabled = false; btn.textContent = "Suggest from my draft"; }
 });
-$("#copyMd").addEventListener("click", () => { copyText(postToMarkdown(current.post, { frontMatter: $("#frontMatter").checked })); offerPublished(); });
+$("#copyMd").addEventListener("click", () => { copyText(exportText()); offerPublished(); });
+$("#exExtra").addEventListener("input", (e) => { const st = store.getSettings(); st.extraFrontMatter = e.target.value; store.saveSettings(st); });
 function offerPublished() { if (current.post.status !== "Published") $("#markPublished").hidden = false; }
 $("#markPublished").addEventListener("click", () => {
   current.post.status = "Published";
@@ -1474,7 +1520,7 @@ $("#markPublished").addEventListener("click", () => {
 });
 $("#downloadMd").addEventListener("click", () => {
   const p = current.post;
-  downloadText(`${new Date().toISOString().slice(0, 10)}-${slugify(p.title)}.md`, postToMarkdown(p, { frontMatter: $("#frontMatter").checked }));
+  downloadText(exportFilename(p), exportText());
   offerPublished();
 });
 

@@ -18,7 +18,14 @@ You type the draft. The assistant suggests, and nothing changes in your draft un
 
 Select some text and the tools appear right next to it; otherwise they act on the paragraph (sentence, for Make it clearer) your cursor is in. Cmd/Ctrl+B, I and K add bold, italic and links. Assistant results stay saved with the post.
 
-Beside the draft you get a **Notes & research** panel for notes, sources with links, and saved questions, with search, "Insert" into the draft, and "Outline from notes". **Versions** saves snapshots: automatically the first time you edit each day and before any restore, plus whenever you click Save. A **"% your words"** counter shows roughly how much of the draft came from accepted suggestions rather than your own typing. **Focus** hides everything but the draft. **Export** previews the post and downloads Markdown with optional Jekyll front matter.
+Beside the draft:
+
+- **Notes & research**: notes, sources with links (paste an excerpt and summarize it), saved questions, search, "Answer in draft", and "Suggest outline" built only from your notes.
+- **Versions**: saved when you open a post, before any big deletion, every 20 minutes of writing, and on demand. Compare any version with now, paragraph by paragraph (moved paragraphs are recognized), and copy back a single paragraph.
+- **Finishing**: Title ideas built from phrases you already wrote, a description helper, tags, a "Before you publish" checklist, live Preview, and Export to Markdown with Jekyll front matter (plus your own front-matter template with `{{slug}}`, `{{date}}`, `{{title}}`). In Chrome and Edge you can save straight into your blog's `_posts` or `_drafts` folder.
+- **Your words**: a counter of how much of the draft is your own wording (accepted rewordings count against it; grammar fixes don't).
+- **Import** Markdown files (front matter is read) or a JSON backup; a reminder nudges you to back up, since posts live only in this browser.
+- **Focus** hides everything but the draft. Works on phones.
 
 ## Bring your own model
 
@@ -64,7 +71,8 @@ js/diff.js            word-level diff for suggestions
 js/store.js           localStorage persistence for posts, settings and keys
 js/providers.js       provider calls, streaming, OpenRouter OAuth
 js/prompts.js         the prompts sent to the model
-js/markdown.js        Markdown export and a small safe preview renderer
+js/markdown.js        Markdown export/import and a small safe preview renderer
+js/folder.js          save into a folder on your computer (File System Access API)
 samples/              the example post
 ```
 

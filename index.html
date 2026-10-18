@@ -70,13 +70,16 @@
           <textarea id="exDesc" rows="2" autofocus placeholder="One sentence on what readers get from this post"></textarea>
           <span class="row between"><span class="hint" id="exDescCount"></span><button type="button" class="ghost small" id="exDescSuggest">Suggest from my draft</button></span></label>
         <label class="field"><span>Tags <em>(comma-separated; optional)</em></span><input id="exTags" placeholder="ai, networking, side projects" autocomplete="off"></label>
+        <details class="field"><summary>More front matter <em>(saved for all your posts)</em></summary>
+          <textarea id="exExtra" rows="3" placeholder="categories: [engineering]&#10;image: /assets/{{slug}}.png&#10;permalink: /post/{{slug}}/" spellcheck="false"></textarea>
+          <span class="hint">One YAML line each. {{slug}}, {{date}} and {{title}} are filled in for each post.</span></details>
       </div>
       <section class="checks" id="exportChecks" aria-label="Before you publish"></section>
       <article class="reading" id="exportBody"></article>
     </div>
     <footer class="dlg-foot row between">
       <label class="check"><input type="checkbox" id="frontMatter" checked> Jekyll front matter</label>
-      <div class="row"><button class="ghost" id="markPublished" hidden>Mark as Published</button><button class="ghost" id="copyMd">Copy Markdown</button><button class="primary" id="downloadMd">Download .md</button></div>
+      <div class="row"><button class="ghost" id="markPublished" hidden>Mark as Published</button><span class="row" id="folderRow"></span><button class="ghost" id="copyMd">Copy Markdown</button><button class="primary" id="downloadMd">Download .md</button></div>
     </footer>
   </div>
 </dialog>

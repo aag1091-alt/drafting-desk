@@ -50,7 +50,7 @@ export function renderMarkdown(md) {
   return html.join("\n");
 }
 
-export function postToMarkdown(post, { frontMatter = true } = {}) {
+export function postToMarkdown(post, { frontMatter = true, extra = "" } = {}) {
   const date = new Date().toISOString().slice(0, 10);
   const q = (v) => `"${String(v).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
   const tags = String(post.tags || "").split(",").map((t) => t.trim()).filter(Boolean);
@@ -59,10 +59,18 @@ export function postToMarkdown(post, { frontMatter = true } = {}) {
       `title: ${q(post.title)}\ndate: ${date}\n` +
       (post.description ? `description: ${q(post.description)}\n` : "") +
       (tags.length ? `tags: [${tags.map(q).join(", ")}]\n` : "") +
+      frontMatterExtra(extra, post, date) +
       "---\n\n"
     : `# ${post.title}\n\n${post.description ? `*${post.description}*\n\n` : ""}`;
   const body = post.body.replace(/\r\n/g, "\n").replace(/[ \t]+$/gm, "").replace(/\n{3,}/g, "\n\n").trim();
   return (head + body).trimEnd() + "\n";
+}
+
+/** Extra front-matter lines from the user's template; {{slug}}, {{date}}, {{title}} are filled in. */
+function frontMatterExtra(extra, post, date) {
+  const lines = String(extra || "").split("\n").map((l) => l.replace(/\s+$/, "")).filter((l) => l.trim() && !/^(layout|title|date|description|tags):/i.test(l.trim()) && !/^---/.test(l));
+  if (!lines.length) return "";
+  return lines.map((l) => l.replace(/\{\{\s*slug\s*\}\}/g, slugify(post.title)).replace(/\{\{\s*date\s*\}\}/g, date).replace(/\{\{\s*title\s*\}\}/g, post.title)).join("\n") + "\n";
 }
 
 export function wordCount(s) {
