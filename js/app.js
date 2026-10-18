@@ -280,7 +280,7 @@ function renderEditor(post) {
             if (i >= 0) { const line = current.post.body.indexOf("\n", i); selectInDraft(i, line < 0 ? current.post.body.length : line); }
           } }),
           h("span", { class: "scope", id: "scope" })),
-        ta),
+        h("div", { class: "draft-wrap" }, h("div", { class: "draft backdrop", id: "backdrop", "aria-hidden": "true" }), ta)),
       assistantPanel()));
   autogrow();
   updateStats();
@@ -297,6 +297,7 @@ function onDraftInput(e) {
   if (p.status === "Idea" && wordCount(p.body) > 30) { p.status = "Drafting"; const sel = $(".status-select"); if (sel) sel.value = "Drafting"; }
   autogrow(false);
   keepCaretVisible();
+  updateHighlights();
   clearTimeout(shrinkTimer);
   shrinkTimer = setTimeout(() => autogrow(true), 800);
   updateStats();
@@ -312,6 +313,22 @@ function onDraftKey(e) {
     else ({ 1: runGrammar, 2: runClarify, 3: runPromptMe, 4: runReview })[k]();
   }
   if (mod && e.key.toLowerCase() === "s") { e.preventDefault(); flushSave(); setSaveState("Saved"); }
+  if (mod && !e.altKey && !e.shiftKey && ["b", "i", "k"].includes(e.key.toLowerCase())) {
+    e.preventDefault();
+    const ta = e.target, s0 = ta.selectionStart, s1 = ta.selectionEnd, sel = ta.value.slice(s0, s1);
+    const k = e.key.toLowerCase();
+    if (k === "k") {
+      const text = sel || "link text";
+      replaceRange(s0, s1, `[${text}](https://)`);
+      const urlStart = s0 + text.length + 3;
+      ta.setSelectionRange(urlStart, urlStart + 8);
+    } else {
+      const mark = k === "b" ? "**" : "*";
+      if (sel.startsWith(mark) && sel.endsWith(mark) && sel.length > mark.length * 2) replaceRange(s0, s1, sel.slice(mark.length, -mark.length));
+      else { replaceRange(s0, s1, mark + sel + mark); if (!sel) ta.setSelectionRange(s0 + mark.length, s0 + mark.length); else ta.setSelectionRange(s0, s1 + mark.length * 2); }
+    }
+    rememberSel();
+  }
 }
 function rememberSel() {
   const ta = draft();
@@ -325,12 +342,14 @@ function autogrow(full = true) {
   const min = window.innerHeight * 0.6;
   if (!full) {
     // while typing, only grow: no collapse, so the page never jumps
-    if (ta.scrollHeight > ta.clientHeight) ta.style.height = ta.scrollHeight + 4 + "px";
+    if (ta.scrollHeight > ta.clientHeight) { ta.style.height = ta.scrollHeight + 4 + "px"; const bd = $("#backdrop"); if (bd) bd.style.height = ta.style.height; }
     return;
   }
   const y = window.scrollY;
   ta.style.height = "auto";
   ta.style.height = Math.max(ta.scrollHeight + 4, min) + "px";
+  const bd = $("#backdrop");
+  if (bd) bd.style.height = ta.style.height;
   window.scrollTo(0, y);
 }
 let shrinkTimer;
@@ -367,6 +386,41 @@ function caretOffset(ta, index) {
 }
 window.addEventListener("resize", autogrow);
 
+let hlFrame = 0;
+/** Mirror the draft behind the textarea and mark passages the assistant has notes on. */
+function updateHighlights() {
+  cancelAnimationFrame(hlFrame);
+  hlFrame = requestAnimationFrame(() => {
+    const bd = $("#backdrop"), ta = draft();
+    if (!bd || !ta) return;
+    const text = current.post.body;
+    const ranges = [];
+    for (const c of cards) {
+      if (c.pending || c.error) continue;
+      if (c.kind === "review") (c.result || []).forEach((r, i) => {
+        if (c.checked?.[i]) return;
+        const at = text.indexOf(r.quote);
+        if (at >= 0) ranges.push({ start: at, end: at + r.quote.length, cls: "hl-review" });
+      });
+      if ((c.kind === "grammar" || c.kind === "clarify") && !c.done && c.original && c.result !== c.original) {
+        const r = locate(c);
+        if (r) ranges.push({ ...r, cls: "hl-suggest" });
+      }
+    }
+    const esc = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    // split into segments so overlapping highlights layer instead of hiding each other
+    const cuts = [...new Set([0, text.length, ...ranges.flatMap((r) => [r.start, r.end])])].sort((x, y) => x - y);
+    let html = "";
+    for (let i = 0; i < cuts.length - 1; i++) {
+      const a = cuts[i], z = cuts[i + 1];
+      const cls = [...new Set(ranges.filter((r) => r.start <= a && r.end >= z).map((r) => r.cls))].join(" ");
+      html += cls ? `<mark class="${cls}">${esc(text.slice(a, z))}</mark>` : esc(text.slice(a, z));
+    }
+    html += "\n";
+    bd.innerHTML = html;
+    bd.style.height = ta.style.height;
+  });
+}
 function updateContents() {
   const sel = $("#contents");
   if (!sel) return;
@@ -455,7 +509,7 @@ function replaceRange(start, end, text) {
   if (!ok || ta.value.slice(start, start + text.length) !== text) ta.setRangeText(text, start, end, "end");
   current.post.body = ta.value;
   lastSel = { start: start + text.length, end: start + text.length };
-  autogrow(); updateStats(); scheduleSave();
+  autogrow(); updateStats(); updateHighlights(); scheduleSave();
 }
 function selectInDraft(start, end) {
   const ta = draft();
@@ -615,6 +669,7 @@ function assistIntro() {
     isReady() ? null : h("button", { class: "primary small", onclick: openSettings }, "Connect a model"));
 }
 function renderCards() {
+  updateHighlights();
   const box = $("#cards");
   if (!box) return;
   $("#clearCards").hidden = !cards.length;
