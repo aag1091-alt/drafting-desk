@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://openrouter.ai https://api.anthropic.com https://api.openai.com https://generativelanguage.googleapis.com http://localhost:* http://127.0.0.1:* https:; form-action 'none'; base-uri 'self'; object-src 'none'">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<meta name="description" content="Type rough notes on the left, get your blog post phrased in your own voice on the right. Runs entirely in your browser with the model you choose.">
+<title>Drafting Desk</title>
+<link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="assets/app.css">
+<script type="module" src="js/app.js"></script>
+</head>
+<body>
+<div id="app"></div>
+
+<!-- Settings -->
+<dialog id="settingsDlg" aria-labelledby="settingsTitle">
+  <form method="dialog" class="dlg">
+    <header class="dlg-head"><h2 id="settingsTitle">Model</h2><button class="icon-btn" value="close" aria-label="Close">×</button></header>
+    <p class="hint">Pick where the writing help comes from. Calls go straight from this browser to the provider; keys are stored only in this browser.</p>
+    <fieldset class="providers" id="providerList"><legend class="sr-only">Provider</legend></fieldset>
+    <div id="providerConfig" class="stack"></div>
+    <label class="check"><input type="checkbox" id="rememberKeys"> Remember keys on this device (otherwise they're forgotten when you close the tab)</label>
+    <div class="row between">
+      <button type="button" class="ghost danger" id="forgetKeys">Forget all keys</button>
+      <div class="row"><span class="status" id="testStatus"></span><button type="button" class="ghost" id="testBtn">Test</button><button class="primary" value="close">Done</button></div>
+    </div>
+  </form>
+</dialog>
+
+<!-- Voice -->
+<dialog id="voiceDlg" aria-labelledby="voiceTitle">
+  <form method="dialog" class="dlg wide">
+    <header class="dlg-head"><h2 id="voiceTitle">Your voice</h2><button class="icon-btn" value="close" aria-label="Close">×</button></header>
+    <p class="hint">This guide is sent with every phrasing request for this post. Edit it freely.</p>
+    <textarea id="voiceText" rows="12" aria-label="Voice guide"></textarea>
+    <details id="learnBox">
+      <summary>Learn my voice from my writing</summary>
+      <p class="hint">Paste two or three things you've written (blog posts, long Slack messages, design docs). The model drafts a guide from them; the samples aren't stored.</p>
+      <textarea id="voiceSamples" rows="8" aria-label="Writing samples" placeholder="Paste your writing here…"></textarea>
+      <div class="row"><button type="button" class="ghost" id="learnBtn">Draft guide from samples</button><span class="status" id="learnStatus"></span></div>
+    </details>
+    <div class="row between">
+      <button type="button" class="ghost" id="voiceDefault">Use for new posts too</button>
+      <button class="primary" value="close">Done</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- New post -->
+<dialog id="newDlg" aria-labelledby="newTitle">
+  <form method="dialog" class="dlg">
+    <header class="dlg-head"><h2 id="newTitle">New post</h2><button class="icon-btn" value="cancel" aria-label="Close">×</button></header>
+    <label class="field"><span>Working title</span><input id="newPostTitle" required placeholder="What I learned building…"></label>
+    <label class="field"><span>What's it about? <em>(optional, helps suggest sections)</em></span><textarea id="newPostIdea" rows="3" placeholder="A sentence or two, in your words"></textarea></label>
+    <div class="row between">
+      <span class="status" id="newStatus"></span>
+      <div class="row"><button type="button" class="ghost" id="newBlank">Start blank</button><button type="button" class="primary" id="newSuggest">Suggest sections</button></div>
+    </div>
+  </form>
+</dialog>
+
+<!-- Preview -->
+<dialog id="previewDlg" aria-labelledby="previewTitle">
+  <div class="dlg wide">
+    <header class="dlg-head"><h2 id="previewTitle">Preview</h2><button class="icon-btn" id="previewClose" aria-label="Close">×</button></header>
+    <article class="reading" id="previewBody"></article>
+    <div class="row between">
+      <label class="check"><input type="checkbox" id="frontMatter" checked> Jekyll front matter</label>
+      <div class="row"><button class="ghost" id="copyMd">Copy Markdown</button><button class="primary" id="downloadMd">Download .md</button></div>
+    </div>
+  </div>
+</dialog>
+
+<!-- Confirm -->
+<dialog id="confirmDlg">
+  <form method="dialog" class="dlg narrow">
+    <p id="confirmText"></p>
+    <div class="row end"><button class="ghost" value="no">Cancel</button><button class="primary danger-fill" value="yes" id="confirmYes">Delete</button></div>
+  </form>
+</dialog>
+
+<input type="file" id="importFile" accept="application/json,.json" hidden>
+<div id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

@@ -1,0 +1,83 @@
+{
+  "title": "Building a purpose-built small model: the prework",
+  "voice": "Write as Avinash Gosavi, a staff engineer who leads a networking platform team and builds side projects on weekends.\n- First person, plain and direct. Short declarative sentences mixed with a longer explanatory one. No hype, no marketing words.\n- Opens with the concrete situation, then the reasoning. Headings are conversational (\"What we actually did\"), not clever.\n- Opinionated but shows the trade-off. Says \"I think\" or \"my read\" when it's a judgment, states facts flatly when they're facts.\n- Favors paragraphs over bullet lists; uses a list only for truly parallel items. Uses em-dashes sparingly for clarification.\n- Specific numbers and names over adjectives. Dry rather than jokey.\n- Sample of his prose: \"In the old world, this kind of cleanup almost never happens on schedule. It's not that people don't want to do it. It's that the cost is high.\" / \"The days of 'I can't afford to run this side project' are over. The only cost now is your time.\"\nRules for phrasing: keep the writer's own words and phrasings wherever they appear in the notes; only reorder, connect and tidy. Never add a fact, number or claim that is not in the notes or the reference facts. If the notes are thin, write less rather than padding. No intro like \"In this post\"; no summary paragraph at the end unless the notes have one.",
+  "length": 280,
+  "sections": [
+    {
+      "name": "Why a small model",
+      "notes": "",
+      "facts": "- Project: open-source small model that turns a plain-English intent into a correct device config; Cisco first; vendor-neutral via OpenConfig YANG.\n- Deterministic, auditable, runs locally; built in public under your name.",
+      "prose": "",
+      "questions": [
+        "What's the one-line pitch for the model? Say it the way you'd say it to a teammate.",
+        "What annoyed you about using a big general LLM for network config? Any specific moment?",
+        "Why do you want this to run on-prem / on the box rather than via an API?",
+        "What do you personally want out of this project (learning, name on it, open source)?",
+        "What are the four questions this post answers, in your words?"
+      ]
+    },
+    {
+      "name": "Sourcing the data",
+      "notes": "",
+      "facts": "- No public corpus of real configs. NANOG 2022 'dump of NOS config examples' thread -> only Jerikan generated configs (https://lists.nanog.org/archives/list/test@lists.nanog.org/thread/JT5MQ4CVDSL777DL6CSQW7LPEEO6BUOR). HF: one 750-row Cisco command dataset. GitHub configs mostly unlicensed (view/fork only per GitHub ToS).\n- MITRE T1602.002: config dumps leak topology and credentials (https://attack.mitre.org/techniques/T1602/002/).\n- arXiv 2512.02861: ~10k intent->config pairs mined from Cisco IOS XE 16.11.1 config-guide PDFs; LLM wrote the matching requirement (https://arxiv.org/abs/2512.02861).\n- Validators: ciscoconfparse2 (syntax), Batfish (Apache 2.0, semantics; Cisco/Juniper/Arista...), containerlab or Cisco Modeling Labs (emulation).\n- NetConfArena (arXiv 2608.23179): 96 templates -> 480 tasks, validated in GNS3; qwen3-8B scored 4.6-9.4%.\n- Dataset size: LIMA 1k curated > 52k; LIMIT 1k-6k useful; practitioner estimate 10k-19k for networking (jaredwatkins.com).\n- Plan: ~5k validated config-generation pairs first, OpenConfig YANG as intent format.",
+      "prose": "",
+      "questions": [
+        "Where did you first go looking for real configs, and what did you find?",
+        "Why won't network engineers share configs? Have you seen this at work?",
+        "How do you plan to generate training pairs? What's the input format, what's the output?",
+        "Describe your validation ladder in your own words: parse → Batfish → emulate. Why that order?",
+        "How many examples do you think you need, and what's your gut based on?"
+      ]
+    },
+    {
+      "name": "How small can it be",
+      "notes": "",
+      "facts": "- Qwen3 pretrained on 36T tokens; TinyLlama 1.1B took 16xA100 for 90 days (https://github.com/jzhang38/TinyLlama).\n- Shortlist: Gemma 3 270M (Gemma terms), Qwen3-0.6B/1.7B/4B-Base (Apache 2.0, 32K ctx), SmolLM3-3B (Apache 2.0, 64K), Gemma 4 E4B (Apache 2.0, 128K, 8B on disk).\n- arXiv 2512.02861: 7B fine-tune -> 57% fully correct + 38% partial vs 42%/12% general LLM.\n- arXiv 2501.19085: fine-tuning helped most at 1B for DSLs (Racket 7%->18%), hurt at 33B.\n- arXiv 2507.10182: 7B coder on 1,500 examples matched GPT-4o on spec generation.\n- Google pitches Gemma 3 270M for unstructured->structured fine-tunes.\n- Q4 sizes (Ollama): Qwen3 0.6B 523MB, 1.7B 1.4GB, 4B 2.6GB, 8B 5.2GB.",
+      "prose": "",
+      "questions": [
+        "When did you realise nobody trains from scratch at hobby scale? What changed in your head?",
+        "Which base models are on your shortlist and why those (license? code ability? size)?",
+        "Do you think a config is more like code or more like prose? Why does that matter for model size?",
+        "What accuracy number would make you comfortable publishing? What's 'good enough'?",
+        "What's your experiment plan: start big and step down, or start small?"
+      ]
+    },
+    {
+      "name": "What training costs",
+      "notes": "",
+      "facts": "- LoRA: freeze base, train low-rank matrices beside each layer (HF PEFT). QLoRA keeps frozen base in 4-bit.\n- Unsloth minimums: QLoRA 3B 3.5GB, 7B 5GB, 8B 6GB VRAM. Full FT 8B: 60-100GB (jarvislabs).\n- RunPod (3 Oct 2026): RTX 4090 $0.74/hr, A100 80GB $1.59/hr, H100 $2.89-3.49/hr. Lambda: A100 $2.79, H100 $3.99.\n- Worked example: QLoRA 7B for ~$3 in 2-4h on an A100 (dev.to/sebuzdugan).\n- Estimates: QLoRA 4B, 10k examples x 3 epochs: 2-4h on 4090, ~$2-3. Full FT 8B ~$10-20. Pretrain 1.1B ~35k GPU-h ~$55k.\n- Mac: mlx-lm LoRA/QLoRA, ~250 tok/s for 7B LoRA on M1 Max; 10k x 300 tok x 3 epochs ~8-10h.\n- AMD ROCm training on Ryzen AI: possible but rough; Vulkan is inference-only.\n- Tools: Unsloth, TRL SFTTrainer, Axolotl, mlx-lm.",
+      "prose": "",
+      "questions": [
+        "What did you assume training would cost before you looked? What's the actual number?",
+        "Explain LoRA/QLoRA the way you'd explain it to a Rails engineer.",
+        "Which hardware do you own that you'll try first (Mac? the Minisforum?), and what do you expect to go wrong?",
+        "Where does the real cost go if not the GPU?",
+        "Which tools are you going to use and why?"
+      ]
+    },
+    {
+      "name": "Publishing a model",
+      "notes": "",
+      "facts": "- HF Hub repo: .safetensors (pickle gets flagged), tokenizer, chat template, README.md with YAML: license, base_model, datasets, pipeline_tag, model-index. Free public storage best-effort; 4B bf16 ~8GB.\n- Qwen3 Apache 2.0 -> your fine-tune can be Apache 2.0 with notice. Gemma derivatives must ship Gemma Terms + NOTICE + use restrictions (also for synthetic-data-trained models). Llama derivatives: 'Llama' in name + 'Built with Meta Llama'.\n- Export: merge_and_unload into bf16 base (not the 4-bit one) -> convert_hf_to_gguf.py -> llama-quantize Q4_K_M / Q8_0 -> upload '-GGUF' repo -> `ollama run hf.co/you/model-GGUF`; or Modelfile + `ollama push`.\n- Evals before publish: held-out split; task validity benchmark (parses / passes Batfish / boots); lm-evaluation-harness sanity check.\n- Dataset repo with dataset card (Parquet); training config + scripts on GitHub, linked from the card.",
+      "prose": "",
+      "questions": [
+        "What did you think 'publishing a model' meant before, and what is it actually?",
+        "Which license do you want on your weights, and does your base model let you?",
+        "Who do you picture running this, and how (Ollama? llama.cpp? on what box)?",
+        "What has to be true before you'd put your name on a release?",
+        "Will you publish the dataset and scripts too? Why?"
+      ]
+    },
+    {
+      "name": "So, the plan",
+      "notes": "",
+      "facts": "- Milestone 1: a few thousand validated intent->config pairs for everyday Cisco IOS tasks (VLANs, trunks, SVIs, static routes, basic OSPF/BGP), mined from public config guides, checked by ciscoconfparse2 + Batfish.\n- Then QLoRA Qwen3-4B-Base on a rented 4090; repeat at 1.7B and 0.6B to find the floor.\n- Ship safetensors + GGUF on HF with dataset and scripts.",
+      "prose": "",
+      "questions": [
+        "What changed in your plan after doing this prework?",
+        "What's milestone one, concretely? Which config tasks are in scope first?",
+        "What will you write about next, and will you include the failures?"
+      ]
+    }
+  ]
+}
