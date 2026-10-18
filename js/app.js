@@ -121,6 +121,7 @@ function visiblePosts(posts) {
   return posts.filter((p) => (homeStatus === "All" || p.status === homeStatus) && (!q || `${p.title} ${p.body}`.toLowerCase().includes(q)));
 }
 function renderHome() {
+  $("#peek")?.remove();
   document.title = "Drafting Desk";
   const posts = store.listPosts();
   app.replaceChildren(
@@ -307,66 +308,56 @@ function renderEditor(post) {
     oninput: (e) => { hideSelBar(); onDraftInput(e); }, onkeydown: onDraftKey, onblur: () => setTimeout(hideSelBar, 150), onselect: rememberSel, onkeyup: rememberSel, onmouseup: rememberSel, onfocus: rememberSel });
   ta.value = post.body;
 
-  const ready = isReady();
-  const tool = (label, kbd, fn, title) => h("button", { class: "tool" + (ready ? "" : " needs-model"),
-    title: ready ? `${title} (${MOD}+Alt+${kbd})` : "Connect a model to use the assistant", onmousedown: (e) => e.preventDefault(), onclick: fn }, label);
-
+  const more = (label, fn) => h("button", { onclick: (e) => { e.target.closest("details").open = false; fn(); } }, label);
   app.replaceChildren(
     h("header", { class: "topbar" },
       h("div", { class: "row nowrap" },
         h("a", { class: "brand", href: "#/", title: "All posts" }, h("span", { class: "brand-mark", "aria-hidden": "true" }), h("span", { class: "brand-text" }, "Drafting Desk")),
         h("a", { class: "back-link", href: "#/" }, "← All posts")),
       h("div", { class: "topbar-actions" },
-        h("button", { class: "ghost wide-only", id: "previewBtn", "aria-pressed": "false", onclick: togglePreview, title: "See the post as readers will" }, "Preview"),
-        h("button", { class: "ghost wide-only", id: "focusBtn", onclick: toggleFocus, title: "Hide side panels" }, "Focus"),
-        h("button", { class: "ghost wide-only", onclick: openVersions }, "Versions"),
-        h("button", { class: "ghost wide-only", onclick: openVoice, title: "Describe how you write, so suggestions sound like you" }, "Your voice"),
+        h("button", { class: "ghost notes-toggle", onclick: toggleNotes, "aria-expanded": "false", title: "Your notes and research for this post" }, `Notes (${post.notes.length})`),
         h("button", { class: "ghost wide-only", onclick: openExport }, "Export"),
-        h("details", { class: "more-menu narrow-only" },
-          h("summary", { class: "ghost" }, "More"),
+        h("details", { class: "more-menu" },
+          h("summary", { class: "ghost", title: "More" }, "More"),
           h("div", { class: "more-list" },
-            h("button", { onclick: (e) => { e.target.closest("details").open = false; togglePreview(); } }, "Preview / Edit"),
-            h("button", { onclick: (e) => { e.target.closest("details").open = false; openExport(); } }, "Export"),
-            h("button", { onclick: (e) => { e.target.closest("details").open = false; openVersions(); } }, "Versions"),
-            h("button", { onclick: (e) => { e.target.closest("details").open = false; openVoice(); } }, "Your voice"),
-            h("button", { onclick: (e) => { e.target.closest("details").open = false; location.hash = "#/"; } }, "All posts"))),
+            more("Preview / Edit", togglePreview),
+            more("Focus (hide the partner)", toggleFocus),
+            more("Versions", openVersions),
+            more("Export", openExport),
+            more("Your voice", openVoice),
+            more("Title ideas", runTitles),
+            more("Review the whole draft", runReview),
+            more("Check spelling everywhere", runGrammarAll),
+            more("All posts", () => (location.hash = "#/")))),
         modelButton())),
+    h("button", { class: "focus-exit", onclick: toggleFocus, title: "Show the partner and menus again (Esc)" }, "Exit focus"),
     h("main", { class: "editor-main" },
-    h("div", { class: "editor-head" },
       h("h1", { class: "sr-only" }, "Editing: ", post.title || "Untitled post"),
-      title,
-      h("div", { class: "meta-row" }, status,
-        h("span", { id: "wordCount" }),
-        h("button", { class: "link-btn small-text set-goal", hidden: !!post.goal, onclick: (e) => { e.target.hidden = true; const g = $(".goal"); g.hidden = false; g.querySelector("input").focus(); } }, "Set a word goal"),
-        h("label", { class: "goal", hidden: !post.goal, title: "Target length in words (optional)" }, "Goal",
-          h("input", { type: "number", min: "0", step: "100", inputmode: "numeric", value: post.goal || "", placeholder: "—", "aria-label": "Word goal",
-            oninput: (e) => { post.goal = Math.max(0, Number(e.target.value) || 0); updateStats(); scheduleSave(); } })), h("button", { id: "authorship", class: "link-btn plain", onclick: () => toast("Your words: roughly how much of the draft is your own wording. Accepted rewordings and outline headings lower it; grammar fixes don't.", { ms: 7000 }), title: "What does this mean?" }),
-        h("button", { class: "ghost small", onclick: runTitles, title: "Title options built from phrases in your draft" }, "Title ideas"),
-        h("span", { id: "saveState", class: "save-state" }, "Saved"))),
-    h("div", { class: "workspace" + (s.notesOpen ? "" : " notes-closed"), id: "workspace" },
-      notesPanel(),
-      h("section", { class: "draft-col", "aria-label": "Draft" },
-        h("div", { class: "toolbar", role: "toolbar", "aria-label": "Assistant tools" },
-          h("button", { class: "ghost small notes-toggle", onclick: toggleNotes, "aria-expanded": String(!!s.notesOpen) }, s.notesOpen ? "Hide notes" : `Notes (${post.notes.length})`),
-          h("div", { class: "tools" },
-            tool("Fix grammar", "1", (e) => (e.shiftKey ? runGrammarAll() : runGrammar()), "Correct spelling and grammar in the selection or this paragraph. Shift-click for the whole draft"),
-            tool("Make it clearer", "2", () => runClarify(), "See what a reader might trip on in this sentence, with clearer wordings to choose from"),
-            tool("I'm stuck", "3", () => runPromptMe(), "Questions that help you think of what to say next"),
-            tool("Review draft", "4", () => runReview(), "An editor's notes on the whole draft, highlighted in your text")),
-          h("select", { id: "contents", class: "contents", "aria-label": "Jump to section", hidden: true, onchange: (e) => {
-            const i = Number(e.target.value); e.target.selectedIndex = 0;
-            if (i >= 0) { const line = current.post.body.indexOf("\n", i); selectInDraft(i, line < 0 ? current.post.body.length : line); }
-          } }),
-          h("span", { class: "scope", id: "scope" })),
-        guideStrip(),
-        h("div", { class: "draft-wrap" }, h("div", { class: "draft backdrop", id: "backdrop", "aria-hidden": "true" }), ta, selectionBar())),
-      assistantPanel())));
+      h("div", { class: "desk", id: "workspace" },
+        h("section", { class: "draft-col", "aria-label": "Draft" },
+          title,
+          h("div", { class: "meta-row" }, status,
+            h("span", { id: "wordCount" }),
+            h("button", { class: "link-btn small-text set-goal", hidden: !!post.goal, onclick: (e) => { e.target.hidden = true; const g = $(".goal"); g.hidden = false; g.querySelector("input").focus(); } }, "Set a word goal"),
+            h("label", { class: "goal", hidden: !post.goal, title: "Target length in words (optional)" }, "Goal",
+              h("input", { type: "number", min: "0", step: "100", inputmode: "numeric", value: post.goal || "", placeholder: "—", "aria-label": "Word goal",
+                oninput: (e) => { post.goal = Math.max(0, Number(e.target.value) || 0); updateStats(); scheduleSave(); } })),
+            h("button", { id: "authorship", class: "link-btn plain", onclick: () => toast("Your words: roughly how much of the draft is your own wording. Accepted rewordings lower it; spelling fixes don't.", { ms: 7000 }), title: "What does this mean?" }),
+            h("select", { id: "contents", class: "contents", "aria-label": "Jump to section", hidden: true, onchange: (e) => {
+              const i = Number(e.target.value); e.target.selectedIndex = 0;
+              if (i >= 0) { const line = current.post.body.indexOf("\n", i); selectInDraft(i, line < 0 ? current.post.body.length : line); }
+            } }),
+            h("span", { id: "saveState", class: "save-state" }, "Saved")),
+          guideStrip(),
+          h("div", { class: "draft-wrap" }, h("div", { class: "draft backdrop", id: "backdrop", "aria-hidden": "true" }), ta, selectionBar())),
+        partnerRail())),
+    );
   autogrow();
   growTitle($(".post-title-input"));
   updateStats();
-  updateScope();
   updateContents();
   renderCards();
+  partnerHello();
   if (!post.body) ta.focus();
   else {
     ta.setSelectionRange(lastSel.start, lastSel.end);
@@ -385,40 +376,55 @@ function growTitle(el) {
   el.style.height = el.scrollHeight + "px";
 }
 function togglePreview() {
-  const btn = $("#previewBtn"), wrap = $(".draft-wrap");
-  const on = btn.getAttribute("aria-pressed") !== "true";
-  btn.setAttribute("aria-pressed", String(on));
-  btn.textContent = on ? "Edit" : "Preview";
+  const wrap = $(".draft-wrap");
+  const on = !document.body.classList.contains("previewing");
   document.body.classList.toggle("previewing", on);
   if (on) closeAnswering(false);
   $("#livePreview")?.remove();
   wrap.hidden = on;
   if (on) {
-    const art = h("article", { class: "reading live-preview", id: "livePreview" });
-    art.innerHTML = renderMarkdown(`# ${current.post.title}\n\n${current.post.body}`);
+    const art = h("article", { class: "reading live-preview", id: "livePreview" },
+      h("button", { class: "ghost small preview-close", onclick: togglePreview }, "Back to writing"));
+    const body = h("div");
+    body.innerHTML = renderMarkdown(`# ${current.post.title}\n\n${current.post.body}`);
+    art.append(body);
     wrap.after(art);
   } else { autogrow(); draft().focus(); }
+  layoutRail();
 }
 function guideStrip() {
   const s = store.getSettings();
   if (s.guideDone) return null;
-  const narrow = window.matchMedia("(max-width: 760px)").matches;
-  const el = h("details", { class: "guide", id: "guide", open: !narrow }, h("summary", { class: "guide-summary" }, "How this works"), h("ol", {},
-    h("li", {}, h("strong", {}, "Write"), " in your own words. Rough is fine; nothing is sent anywhere while you type."),
-    h("li", {}, h("strong", {}, "Stuck?"), " Press ", h("em", {}, "I'm stuck"), " for questions that get you going."),
-    h("li", {}, h("strong", {}, "Select a sentence"), " to fix its grammar or make it clearer. You approve every change."),
-    h("li", {}, h("strong", {}, "Finished a draft?"), " ", h("em", {}, "Review draft"), " gives you an editor's notes, highlighted in your text.")),
-    h("button", { class: "link-btn guide-close", onclick: () => { const st = store.getSettings(); st.guideDone = true; store.saveSettings(st); el.remove(); autogrow(); } }, "Got it"));
+  const el = h("div", { class: "guide", id: "guide", role: "note" },
+    h("p", {}, h("strong", {}, "Just write."), narrow() ? " Your partner (below your text) reads along when you pause" : " Your partner on the right reads along when you pause and, now and then, suggests a better wording, a fix, or something worth adding. Nothing changes in your draft unless you click ", h("em", {}, "Use"), "."),
+    h("button", { class: "link-btn guide-close", onclick: () => { const st = store.getSettings(); st.guideDone = true; store.saveSettings(st); el.remove(); autogrow(); layoutRail(); } }, "Got it"));
   return el;
 }
 
 // ---------- floating tools next to a selection ----------
+const SEL_TOOLS = [
+  { label: "Fix grammar", icon: "✓", key: "1", tip: "Spelling, grammar and punctuation only. You see every change before accepting.", run: () => runGrammar() },
+  { label: "Make it clearer", icon: "≈", key: "2", tip: "What a reader might trip on, with wordings close to yours to pick from.", run: () => runClarify() },
+  { label: "I'm stuck", icon: "?", key: "3", tip: "Questions that get you thinking. You answer them in your own words.", run: () => runPromptMe() },
+  { label: "Review draft", icon: "✎", key: "4", tip: "An editor's notes on the whole draft, highlighted in your text.", run: () => runReview() },
+];
 function selectionBar() {
   const stop = (e) => e.preventDefault();
+  const tip = h("p", { class: "sel-tip", id: "selTip" });
+  const idle = () => { tip.textContent = "Nothing changes in your draft until you accept."; };
+  idle();
+  const btn = (t) => h("button", { onmousedown: stop, title: `${t.tip} (${MOD}+Alt+${t.key})`, "aria-describedby": "selTip",
+    onmouseenter: () => { tip.textContent = t.tip; }, onfocus: () => { tip.textContent = t.tip; }, onmouseleave: idle, onblur: idle,
+    onclick: () => { hideSelBar(); t.run(); } }, h("span", { class: "sel-icon", "aria-hidden": "true" }, t.icon), t.label);
   return h("div", { class: "sel-bar", id: "selBar", hidden: true, role: "toolbar", "aria-label": "Help with the selected text" },
-    h("button", { onmousedown: stop, onclick: () => { hideSelBar(); runGrammar(); } }, "Fix grammar"),
-    h("button", { onmousedown: stop, onclick: () => { hideSelBar(); runClarify(); } }, "Make it clearer"),
-    h("button", { onmousedown: stop, onclick: () => { hideSelBar(); askAboutSelection(); } }, "Ask about this"));
+    h("div", { class: "sel-row" }, SEL_TOOLS.map(btn),
+      h("button", { class: "sel-ask", onmousedown: stop, title: "Ask your partner about this passage",
+        onmouseenter: () => { tip.textContent = "Ask your partner anything about this passage."; }, onmouseleave: idle,
+        onclick: () => { hideSelBar(); askAboutSelection(); } }, h("span", { class: "sel-icon", "aria-hidden": "true" }, "…"), "Ask"),
+      h("button", { class: "sel-note", onmousedown: stop, title: "Write a note attached to these words",
+        onmouseenter: () => { tip.textContent = "Attach a note to these words. It's kept with your notes, linked back to this passage."; }, onmouseleave: idle,
+        onclick: () => { hideSelBar(); noteOnSelection(); } }, h("span", { class: "sel-icon", "aria-hidden": "true" }, "✱"), "Note")),
+    tip);
 }
 let dismissedSel = "";
 function hideSelBar() {
@@ -432,14 +438,14 @@ function updateSelBar() {
   const { start, end } = lastSel;
   const text = ta.value.slice(start, end);
   const small = window.matchMedia("(max-width: 760px), (pointer: coarse)").matches;
-  if (small || end - start < 3 || !text.trim() || document.activeElement !== ta || !isReady() || dismissedSel === `${start}:${end}`) { bar.hidden = true; return; }
+  if (end - start < 3 || !text.trim() || document.activeElement !== ta || !isReady() || dismissedSel === `${start}:${end}`) { bar.hidden = true; return; }
   const pos = caretPoint(ta, start);
   bar.hidden = false;
   const w = bar.offsetWidth;
   const left = Math.max(8, Math.min(pos.left - 12, ta.clientWidth - w - 8));
   const top = pos.top - bar.offsetHeight - 8;
   bar.style.left = left + "px";
-  bar.style.top = (top < 4 ? caretPoint(ta, end).top + pos.lh + 6 : top) + "px";
+  bar.style.top = (small || top < 4 ? caretPoint(ta, end).top + pos.lh + 10 : top) + "px";
 }
 function askAboutSelection() {
   const { start, end } = lastSel;
@@ -451,8 +457,13 @@ function askAboutSelection() {
   box.scrollIntoView({ block: "nearest", behavior: "smooth" });
 }
 
+let typingTimer = 0;
+document.addEventListener("mousemove", () => { if (document.body.classList.contains("typing")) document.body.classList.remove("typing"); });
 function onDraftInput(e) {
   const p = current.post;
+  document.body.classList.add("typing");
+  clearTimeout(typingTimer);
+  typingTimer = setTimeout(() => document.body.classList.remove("typing"), 4000);
   if (!current.versionedToday) { autoVersion(); current.versionedToday = true; }
   // keep what was there before any big deletion, and a version every 20 minutes of writing
   const removed = p.body.length - e.target.value.length;
@@ -463,7 +474,9 @@ function onDraftInput(e) {
   autogrow(false);
   keepCaretVisible();
   updateHighlights();
+  layoutRail();
   if (answering && current.post.body.length - answering.start > 60) closeAnswering(true);
+  partnerTyped();
   clearTimeout(cardsTimer);
   if (cards.some((c) => !c.done && (c.kind === "grammar" || c.kind === "clarify"))) cardsTimer = setTimeout(renderCards, 600);
   clearTimeout(shrinkTimer);
@@ -482,7 +495,7 @@ function onDraftKey(e) {
   }
   if (mod && e.key.toLowerCase() === "s") { e.preventDefault(); flushSave(); setSaveState("Saved"); }
   if (e.altKey && e.key === "Enter") {
-    const c = cards.find((x, i) => !x.pending && !x.error && !x.done && !isCollapsed(x, i) && ((x.kind === "grammar" && x.result !== x.original && x.original) || (x.kind === "clarify" && x.result?.options?.length)));
+    const c = cards.find((x, i) => !x.pending && !x.error && !x.done && !isCollapsed(x, i) && ((x.kind === "pair" && (x.sub === "better" || x.sub === "fix") && locate(x)) || (x.kind === "grammar" && x.result !== x.original && x.original) || (x.kind === "clarify" && x.result?.options?.length)));
     if (c) { e.preventDefault(); acceptText(c, c.kind === "grammar" ? c.result : c.result.options[0].text); if (c.kind === "clarify") c.chosen = 0; }
   }
   if (mod && !e.altKey && !e.shiftKey && ["b", "i", "k"].includes(e.key.toLowerCase())) {
@@ -506,7 +519,7 @@ function rememberSel() {
   const ta = draft();
   if (!ta) return;
   lastSel = { start: ta.selectionStart, end: ta.selectionEnd };
-  if (current) current.post.cursor = ta.selectionEnd;
+  if (current) { current.post.cursor = ta.selectionEnd; partnerMoved(); markActive(); markActiveNotes(); }
   updateScope();
   updateSelBar();
 }
@@ -578,7 +591,7 @@ function caretOffset(ta, index) {
   mirror.remove();
   return top;
 }
-window.addEventListener("resize", () => { autogrow(); hideSelBar(); });
+window.addEventListener("resize", () => { autogrow(); hideSelBar(); layoutRail(); });
 
 /** Find a quoted passage even if the model changed quotes, spacing or case slightly. */
 function findQuote(body, quote) {
@@ -613,6 +626,11 @@ function updateHighlights() {
     const ranges = [];
     for (const c of cards) {
       if (c.pending || c.error) continue;
+      if ((c.kind === "pair" || c.kind === "note") && !c.done) {
+        const r = c.kind === "note" ? findQuote(text, c.anchor) : locate(c) || findQuote(text, c.anchor);
+        if (r) ranges.push({ ...r, cls: c.kind === "note" ? "hl-review" : c.sub === "fix" ? "hl-fix" : "hl-quiet", id: c.id });
+        continue;
+      }
       if (c.kind === "review") (c.result || []).forEach((r, i) => {
         if (c.checked?.[i]) return;
         const at = findQuote(text, r.quote);
@@ -623,14 +641,22 @@ function updateHighlights() {
         if (r) ranges.push({ ...r, cls: "hl-suggest" });
       }
     }
+    for (const n of current.post.notes) {
+      if (!n.anchor) continue;
+      const r = findQuote(text, n.anchor);
+      if (r) ranges.push({ ...r, cls: "hl-note", note: n.id });
+    }
     const esc = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     // split into segments so overlapping highlights layer instead of hiding each other
     const cuts = [...new Set([0, text.length, ...ranges.flatMap((r) => [r.start, r.end])])].sort((x, y) => x - y);
     let html = "";
     for (let i = 0; i < cuts.length - 1; i++) {
       const a = cuts[i], z = cuts[i + 1];
-      const cls = [...new Set(ranges.filter((r) => r.start <= a && r.end >= z).map((r) => r.cls))].join(" ");
-      html += cls ? `<mark class="${cls}">${esc(text.slice(a, z))}</mark>` : esc(text.slice(a, z));
+      const hit = ranges.filter((r) => r.start <= a && r.end >= z && r.end > r.start);
+      const cls = [...new Set(hit.map((r) => r.cls))].join(" ");
+      const ids = hit.map((r) => r.id).filter(Boolean).join(" ");
+      const notes = hit.map((r) => r.note).filter(Boolean).join(" ");
+      html += cls ? `<mark class="${cls}"${ids ? ` data-card="${ids}"` : ""}${notes ? ` data-note="${notes}"` : ""}>${esc(text.slice(a, z))}</mark>` : esc(text.slice(a, z));
     }
     html += "\n";
     bd.innerHTML = html;
@@ -744,6 +770,7 @@ function notesPanel() {
     h("div", { class: "panel-head" }, h("h2", {}, "Notes & research"),
       h("button", { class: "ghost small", onclick: runOutline, title: "Suggest section headings built only from your notes" }, "Suggest outline")),
     h("div", { class: "note-add" },
+      h("div", { id: "linkChip", class: "link-chip", hidden: true }),
       h("textarea", { id: "newNote", rows: "3", placeholder: `Jot a thought, a fact, a line you might use… (${MOD}+Enter to add)`,
         onkeydown: (e) => { if ((isMac ? e.metaKey : e.ctrlKey) && e.key === "Enter") { e.preventDefault(); addNoteFromBox(); } } }),
       h("div", { class: "row between" },
@@ -769,8 +796,10 @@ function noteItems() {
   const q = noteQuery.trim().toLowerCase();
   const list = p.notes.filter((n) => (noteFilter === "all" || n.kind === noteFilter) && (!q || `${n.title} ${n.text} ${n.url}`.toLowerCase().includes(q)));
   if (!list.length) return [h("li", { class: "empty" }, p.notes.length ? "Nothing matches." : "Notes, sources and questions you save will collect here.")];
-  return list.slice().reverse().map((n) => h("li", { class: "note " + n.kind, "data-id": n.id },
+  return list.slice().reverse().map((n) => h("li", { class: "note " + n.kind + (n.anchor ? " linked" : ""), "data-id": n.id,
+      onmouseenter: () => n.anchor && flashNote(n, true), onmouseleave: () => n.anchor && flashNote(n, false) },
     n.kind !== "note" ? h("span", { class: "chip" }, n.kind === "source" ? "Source" : "Question") : null,
+    n.anchor ? linkedQuote(n) : null,
     n.kind === "source" && (n.title || n.url) ? h("div", { class: "note-title" }, n.url ? h("a", { href: n.url, target: "_blank", rel: "noopener noreferrer" }, n.title || n.url) : n.title) : null,
     h("div", { class: "note-text", contenteditable: "true", spellcheck: "true", "aria-label": "Edit note", title: "Click to edit",
       onblur: (e) => { const t = e.target.innerText.trim(); if (t !== n.text) { n.text = t; scheduleSave(); } } }, n.text),
@@ -778,12 +807,17 @@ function noteItems() {
       n.kind === "note" ? h("button", { class: "link-btn", onmousedown: (e) => e.preventDefault(), onclick: () => insertAtCursor(n.text), title: "Insert this note's text at your cursor in the draft" }, "Insert") : null,
       n.kind === "question" ? (n.answered ? h("span", { class: "ok-text small-text" }, "Answered ✓") : h("button", { class: "link-btn", onmousedown: (e) => e.preventDefault(), onclick: () => answerQuestion(n.text), title: "Start a new paragraph in the draft to answer this" }, "Answer in draft")) : null,
       n.kind === "source" && n.url ? h("button", { class: "link-btn", onmousedown: (e) => e.preventDefault(), onclick: () => insertLink(n), title: "Link the selected words to this source, or insert the source's title as a link" }, "Insert link") : null,
+      n.anchor ? null : h("button", { class: "link-btn", onmousedown: (e) => e.preventDefault(), onclick: () => linkNoteToSelection(n), title: "Connect this note to the words you've selected in your draft" }, "Link to text"),
       h("span", { class: "note-date" }, timeAgo(n.created)),
       h("button", { class: "link-btn danger", onclick: () => { removeNote(n.id); } }, "Delete"))));
 }
 function renderNotes() {
   const list = $("#noteList");
   if (list) list.replaceChildren(...noteItems());
+  markActiveNotes();
+  if (current) updateHighlights();
+  const b = $(".notes-toggle");
+  if (b && current) b.textContent = `Notes (${current.post.notes.length})`;
   document.querySelectorAll(".note-filters .filter").forEach((b, i) => {
     const k = ["all", "note", "source", "question"][i];
     b.classList.toggle("on", k === noteFilter);
@@ -795,7 +829,7 @@ function addNote(note) {
   scheduleSave();
   renderNotes();
   const b = $(".notes-toggle");
-  if (b && !notesOpen()) b.textContent = `Notes (${current.post.notes.length})`;
+  if (b) b.textContent = `Notes (${current.post.notes.length})`;
 }
 function removeNote(id) {
   const p = current.post;
@@ -810,9 +844,61 @@ function addNoteFromBox() {
   const box = $("#newNote");
   const text = box.value.trim();
   if (!text) { box.focus(); return; }
-  addNote(store.blankNote("note", { text }));
+  addNote(store.blankNote("note", pendingLink ? { text, anchor: pendingLink } : { text }));
+  if (pendingLink) toast("Note linked to your text");
+  setPendingLink(null);
   box.value = "";
   box.focus();
+}
+
+// ---------- notes linked to passages in the draft ----------
+let pendingLink = null;
+function setPendingLink(quote) {
+  pendingLink = quote;
+  const chip = $("#linkChip");
+  if (!chip) return;
+  chip.hidden = !quote;
+  chip.replaceChildren(...(quote ? [h("span", {}, "Linked to ", h("q", {}, clip(quote, 70))), h("button", { class: "icon-btn small", "aria-label": "Don't link", title: "Don't link", onclick: () => setPendingLink(null) }, "×")] : []));
+}
+/** From the selection bar: start a note attached to the selected words. */
+function noteOnSelection() {
+  const { start, end } = lastSel;
+  const quote = current.post.body.slice(start, end).trim();
+  if (!quote) return;
+  setPendingLink(quote.slice(0, 600));
+  const col = $("#notesCol");
+  col?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  setTimeout(() => $("#newNote")?.focus({ preventScroll: true }), 250);
+}
+function linkNoteToSelection(n) {
+  const { start, end } = lastSel;
+  const quote = current.post.body.slice(start, end).trim();
+  if (!quote) { toast("Select the words in your draft first, then click Link to text."); return; }
+  n.anchor = quote.slice(0, 600);
+  scheduleSave(); renderNotes(); updateHighlights();
+  toast("Note linked to your text");
+}
+function linkedQuote(n) {
+  const at = findQuote(current.post.body, n.anchor);
+  return h("div", { class: "note-link" + (at ? "" : " gone") },
+    h("button", { class: "link-quote", title: at ? "Show in draft" : "That passage has changed", onmousedown: (e) => e.preventDefault(),
+      onclick: () => { const r = findQuote(current.post.body, n.anchor); if (r) selectInDraft(r.start, r.end); else toast("That passage has changed in your draft."); } },
+      "↳ ", h("q", {}, clip(n.anchor, 80))),
+    h("button", { class: "icon-btn small", title: "Unlink from the text", "aria-label": "Unlink from the text", onclick: () => { delete n.anchor; scheduleSave(); renderNotes(); updateHighlights(); } }, "×"));
+}
+function flashNote(n, on) {
+  document.querySelectorAll(`#backdrop mark[data-note~="${n.id}"]`).forEach((m) => m.classList.toggle("hl-hover", on));
+}
+/** Notes whose passage holds the cursor light up in the list. */
+function markActiveNotes() {
+  const list = $("#noteList");
+  if (!list || !current) return;
+  const pos = lastSel.end;
+  for (const li of list.children) {
+    const n = current.post.notes.find((x) => x.id === li.dataset.id);
+    const r = n?.anchor ? findQuote(current.post.body, n.anchor) : null;
+    li.classList.toggle("active", !!r && pos >= r.start && pos <= r.end);
+  }
 }
 function addSource() {
   const url = $("#srcUrl").value.trim(), title = $("#srcTitle").value.trim(), text = $("#srcText").value.trim();
@@ -879,52 +965,144 @@ function insertAtCursor(text) {
   const pad = before && !/\s$/.test(before) ? " " : "";
   replaceRange(start, end, pad + text);
 }
+/** Notes live in the margin under the partner; the Notes button takes you there. */
 function toggleNotes() {
-  const open = !notesOpen();
-  if (window.matchMedia("(max-width: 1100px)").matches) sessionNotesOpen = open;
-  else { const s = store.getSettings(); s.notesOpen = open; store.saveSettings(s); }
-  $("#workspace").classList.toggle("notes-closed", !open);
-  const b = $(".notes-toggle");
-  b.textContent = open ? "Hide notes" : `Notes (${current.post.notes.length})`;
-  b.setAttribute("aria-expanded", String(open));
-  autogrow();
+  const col = $("#notesCol");
+  if (!col) return;
+  if (document.body.classList.contains("focus")) toggleFocus();
+  col.scrollIntoView({ behavior: "smooth", block: "start" });
+  setTimeout(() => $("#newNote")?.focus({ preventScroll: true }), 300);
 }
 function toggleFocus() {
-  const on = document.body.classList.toggle("focus");
-  $("#focusBtn").textContent = on ? "Exit focus" : "Focus";
+  document.body.classList.toggle("focus");
   autogrow();
+  layoutRail();
   draft().focus();
 }
-document.addEventListener("keydown", (e) => { if (e.key === "Escape" && document.body.classList.contains("focus") && !document.querySelector("dialog[open]")) toggleFocus(); });
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || document.querySelector("dialog[open]")) return;
+  const d = $("#notesDrawer");
+  if (d && !d.hidden) { e.preventDefault(); toggleNotes(); return; }
+  if (document.body.classList.contains("previewing")) { togglePreview(); return; }
+  if (document.body.classList.contains("focus")) toggleFocus();
+});
 
 // ---------- assistant panel ----------
-function assistantPanel() {
-  return h("aside", { class: "assist-col", "aria-label": "Assistant" },
-    h("div", { class: "panel-head" }, h("h2", {}, "Assistant"),
-      h("button", { class: "ghost small", id: "clearCards", onclick: () => { cards = []; renderCards(); persistCards(); } }, "Clear")),
+function partnerRail() {
+  const st = store.getSettings();
+  const on = st.partner !== false;
+  return h("aside", { class: "rail", id: "rail", "aria-label": "Writing partner" },
+    h("div", { class: "rail-head" },
+      h("span", { class: "partner-name" }, h("span", { class: "partner-dot" + (on && isReady() ? " live" : ""), id: "partnerDot", "aria-hidden": "true" }), "Partner"),
+      h("label", { class: "switch", title: on ? "Partner chimes in when you pause" : "Partner stays quiet until you ask" },
+        h("input", { type: "checkbox", id: "partnerOn", checked: on, onchange: (e) => { const s2 = store.getSettings(); s2.partner = e.target.checked; store.saveSettings(s2); $("#partnerDot").classList.toggle("live", e.target.checked && isReady()); toast(e.target.checked ? "Partner will chime in when you pause" : "Partner is quiet; ask whenever you like"); } }),
+        h("span", {}, "Chime in"))),
     h("form", { class: "ask-form", onsubmit: (e) => { e.preventDefault(); runAsk(); } },
-      h("textarea", { id: "askBox", rows: "2", placeholder: "Ask about your draft… e.g. Does my intro earn the main claim?", "aria-label": "Ask the assistant about your draft",
-        onkeydown: (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); runAsk(); } } }),
-      h("button", { class: "ghost small" }, "Ask")),
-    h("div", { id: "cards", class: "cards", "aria-live": "polite" }));
+      h("textarea", { id: "askBox", rows: "1", placeholder: "Ask your partner…", "aria-label": "Ask your partner about your draft",
+        onkeydown: (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); runAsk(); } } })),
+    // shortcuts appear under the ask box when you go to it (and when the margin is empty)
+    h("div", { class: "chips", onmousedown: (e) => e.preventDefault() },
+      h("button", { class: "chip-btn", onclick: () => { $("#askBox").blur(); runNext(); } }, "What next?"),
+      h("button", { class: "chip-btn", onclick: () => { $("#askBox").blur(); runReview(); } }, "Review my draft"),
+      h("button", { class: "chip-btn", onclick: () => { $("#askBox").blur(); runGrammarAll(); } }, "Check spelling")),
+    h("div", { id: "cards", class: "cards rail-cards", "aria-live": "polite" }),
+    notesPanel());
 }
 function assistIntro() {
-  return h("div", { class: "assist-intro" },
-    h("p", {}, "You write; I suggest. Nothing changes in your draft unless you accept it."),
-    h("dl", {},
-      h("dt", {}, "Fix grammar"), h("dd", {}, "Spelling, grammar and punctuation only. You see every change before accepting."),
-      h("dt", {}, "Make it clearer"), h("dd", {}, "What a reader might trip on, with wordings close to yours to pick from."),
-      h("dt", {}, "I'm stuck"), h("dd", {}, "Questions that get you thinking. You answer them in your own words."),
-      h("dt", {}, "Review draft"), h("dd", {}, "An editor's notes on the whole draft, highlighted in your text.")),
-    h("p", { class: "hint" }, `Tip: select some text and the tools appear right next to it. Shortcuts: ${MOD}+Alt+1 to 4.`),
-    isReady() ? null : h("button", { class: "primary small", onclick: openSettings }, "Connect a model"));
+  if (!isReady()) return h("div", { class: "rail-empty" },
+    h("p", {}, "Connect a model and your partner will read along as you write: better wordings, fixes, and ideas, right here beside your text."),
+    h("button", { class: "primary small", onclick: openSettings }, "Connect a model"));
+  return h("div", { class: "rail-empty" },
+    h("p", {}, store.getSettings().partner === false
+      ? "Partner is quiet. Ask a question above, or turn on Chime in."
+      : "Write away. When you pause, your partner reads the paragraph you just wrote and only speaks up if it has something useful."),
+    narrow() ? h("p", { class: "hint" }, "Suggestions show up here, and a small badge at the bottom of the screen tells you when there's something new.")
+      : h("p", { class: "hint" }, `Select any words in your draft to fix grammar, make it clearer, ask about it, or attach a note. Shortcuts: ${MOD}+Alt+1 to 4.`));
 }
 function renderCards() {
   updateHighlights();
   const box = $("#cards");
   if (!box) return;
-  $("#clearCards").hidden = !cards.length;
-  box.replaceChildren(...(cards.length ? cards.map((c, i) => (isCollapsed(c, i) ? cardSummary(c) : cardView(c))) : [assistIntro()]));
+  const visible = cards.filter((c) => !(c.kind === "pair" && c.done));
+  box.replaceChildren(...(visible.length ? visible.map((c) => {
+    const i = cards.indexOf(c);
+    const el = isCollapsed(c, i) ? cardSummary(c) : cardView(c);
+    el.addEventListener("mouseenter", () => flashAnchor(c, true));
+    el.addEventListener("mouseleave", () => flashAnchor(c, false));
+    return el;
+  }) : [assistIntro()]));
+  markActive();
+  layoutRail();
+  updatePeek();
+}
+const narrow = () => window.matchMedia("(max-width: 980px)").matches;
+/** On phones the margin sits under the draft; a small badge says when the partner has something. */
+function updatePeek() {
+  let pill = $("#peek");
+  const rail = $("#rail");
+  const n = cards.filter((c) => !c.done && !c.pending && (c.kind === "pair" || c.kind === "next" || c.kind === "note")).length;
+  const railVisible = rail && rail.getBoundingClientRect().top < window.innerHeight - 40;
+  const show = narrow() && n > 0 && !railVisible && !document.body.classList.contains("focus");
+  if (!pill) {
+    if (!show) return;
+    pill = h("button", { id: "peek", class: "peek", onclick: () => $("#rail")?.scrollIntoView({ behavior: "smooth", block: "start" }) });
+    document.body.append(pill);
+  }
+  pill.hidden = !show;
+  pill.replaceChildren(h("span", { class: "partner-dot live", "aria-hidden": "true" }), `Partner: ${n} suggestion${n === 1 ? "" : "s"} ↓`);
+}
+window.addEventListener("scroll", () => { if (current) updatePeek(); }, { passive: true });
+/** The card(s) about the paragraph you're in stand out, like the active comment in a doc. */
+function markActive() {
+  const box = $("#cards");
+  if (!box || !current) return;
+  const para = paragraphAt(current.post.body, lastSel.end);
+  for (const el of box.children) {
+    const c = cards.find((x) => x.id === el.dataset.card);
+    const r = c && c.kind !== "next" ? anchorRange(c) : null;
+    el.classList.toggle("active", !!r && r.start >= para.start && r.start <= para.end);
+  }
+}
+
+/** Where in the draft a card is about: a quote, the start, or the end. */
+function anchorRange(c) {
+  const body = current.post.body;
+  if (c.anchor === "end" || c.kind === "next") return { start: body.length, end: body.length };
+  if (c.anchor === "top" || !c.anchor) return null;
+  return findQuote(body, c.anchor);
+}
+let railFrame = 0;
+/** Line cards up beside the paragraph they talk about, like comments in a margin. */
+function layoutRail() {
+  cancelAnimationFrame(railFrame);
+  railFrame = requestAnimationFrame(() => {
+    const box = $("#cards"), ta = draft(), wrap = $(".draft-wrap");
+    if (!box || !ta || !wrap) return;
+    const stacked = window.matchMedia("(max-width: 980px)").matches || document.body.classList.contains("previewing");
+    box.classList.toggle("stacked", stacked);
+    const els = [...box.children];
+    if (stacked) { els.forEach((el) => { el.style.top = ""; }); box.style.height = ""; return; }
+    const offset = wrap.getBoundingClientRect().top - box.getBoundingClientRect().top;
+    const items = els.map((el) => {
+      const c = cards.find((x) => x.id === el.dataset.card);
+      const r = c ? anchorRange(c) : null;
+      const want = r ? offset + caretOffset(ta, r.start) - 6 : 0;
+      return { el, want, pinned: !r };
+    });
+    // unanchored results (answers, titles…) sit at the top; anchored ones follow their paragraph
+    let y = 0;
+    for (const it of items.filter((x) => x.pinned)) { it.el.style.top = y + "px"; y += it.el.offsetHeight + 10; }
+    for (const it of items.filter((x) => !x.pinned).sort((a, b) => a.want - b.want)) {
+      const top = Math.max(it.want, y);
+      it.el.style.top = top + "px";
+      y = top + it.el.offsetHeight + 10;
+    }
+    box.style.height = Math.max(y, 120) + "px";
+  });
+}
+function flashAnchor(c, on) {
+  const marks = document.querySelectorAll(`#backdrop mark[data-card~="${c.id}"]`);
+  marks.forEach((m) => m.classList.toggle("hl-hover", on));
 }
 function persistCards(postId = current?.post.id) {
   if (!postId) return;
@@ -962,11 +1140,13 @@ function requireModel() {
   toast("Connect a model to use the assistant.", { action: { label: "Connect", run: openSettings } });
   return false;
 }
-const KIND_LABEL = { titles: "Title ideas",  grammar: "Grammar", clarify: "Make it clearer", prompt: "I'm stuck", review: "Review", outline: "Outline", ask: "Ask" };
+const KIND_LABEL = { titles: "Title ideas", grammar: "Spelling", clarify: "Make it clearer", prompt: "Questions", review: "Review", outline: "Outline", ask: "Ask", note: "Note", next: "What next", pair: "Partner" };
+const PAIR_LABEL = { better: "Reads better as", fix: "Typo", idea: "You could add", question: "A reader might ask" };
 
 const AUTO_FOLD = new Set(["grammar", "clarify", "titles", "prompt"]);
 function isCollapsed(c, i) {
   if (c.pending || c.error) return false;
+  if (c.kind === "pair" || c.kind === "note" || c.kind === "next") return !!c.collapsed;
   if (c.collapsed != null) return c.collapsed;
   if (c.batch) return !!c.done; // whole-draft results stay open until handled
   if (c.kind === "outline") return i > 2;
@@ -980,14 +1160,91 @@ function cardSummary(c) {
     h("span", { class: "card-what" }, clip(what.replace(/\s+/g, " "), 60)),
     status ? h("span", { class: "card-status" + (c.done ? " ok-text" : "") }, status) : null);
 }
+/** Partner suggestions, margin notes and next-step nudges: small, quick to act on. */
+/** Keep only a few words of context around the changes, so a card shows what changes, not the whole paragraph. */
+function trimDiff(parts, ctx = 6) {
+  const first = parts.findIndex((p) => p.type !== "same");
+  if (first < 0) return parts;
+  let last = parts.length - 1;
+  while (parts[last].type === "same") last--;
+  const words = (t) => t.split(/(\s+)/);
+  const out = parts.map((p) => ({ ...p }));
+  if (first > 0) { const w = words(out[0].text); if (w.length > ctx * 2 + 1 && first === 1) out[0].text = "…" + w.slice(-ctx * 2).join(""); }
+  if (last < parts.length - 1 && last === parts.length - 2) { const w = words(out[out.length - 1].text); if (w.length > ctx * 2 + 1) out[out.length - 1].text = w.slice(0, ctx * 2).join("") + "…"; }
+  // long unchanged stretches between changes shrink too
+  for (let i = 1; i < out.length - 1; i++) if (out[i].type === "same") { const w = words(out[i].text); if (w.length > ctx * 4 + 1) out[i].text = w.slice(0, ctx * 2).join("") + " … " + w.slice(-ctx * 2).join("").trimStart(); }
+  return out;
+}
+function partnerCardBody(c, el) {
+  el.classList.add("pair-card", "pair-" + (c.sub || c.kind));
+  const dismiss = () => {
+    if (c.anchor && c.kind === "pair") (current.post.partnerDismissed ||= []).push(c.anchor.slice(0, 80));
+    dropCard(c);
+  };
+  if (c.kind === "pair" && c.sub === "fix") {
+    const r = locate(c);
+    const body = current.post.body;
+    const lead = r ? body.slice(Math.max(0, r.start - 40), r.start) : "";
+    const sentence = lead.replace(/^[\s\S]*[.!?\n]\s+/, "");
+    const before = (sentence.match(/(\S+\s+){0,3}$/) || [""])[0];
+    const cut = before.length < sentence.length || (sentence === lead && r && r.start > 40);
+    const after = r ? (body.slice(r.end, r.end + 40).match(/^(\s*\S+){0,3}/) || [""])[0] : "";
+    el.classList.add("compact");
+    el.append(h("div", { class: "fix-row" },
+      h("p", { class: "diff", title: "Click to see it in your draft", onclick: () => { if (r) selectInDraft(r.start, r.end); } },
+        (cut ? "…" : "") + before, wordDiff(c.original, c.result).map((p) => p.type === "same" ? p.text : h(p.type === "add" ? "ins" : "del", {}, p.text)), after ? after + "…" : ""),
+      r ? h("button", { class: "primary small", title: "Fix it (Alt+Enter)", onclick: () => acceptText(c, c.result) }, "Fix") : h("span", { class: "hint stale" }, "Changed since."),
+      h("button", { class: "icon-btn small", title: "Not now", "aria-label": "Not now", onclick: dismiss }, "×")));
+    return el;
+  }
+  if (c.kind === "pair" && c.sub === "better") {
+    const stale = !locate(c);
+    const parts = trimDiff(wordDiff(c.original, c.result));
+    el.append(h("p", { class: "diff", title: "Click to see it in your draft", onclick: () => { const r = locate(c); if (r) selectInDraft(r.start, r.end); } }, parts.map((p) => p.type === "same" ? p.text : h(p.type === "add" ? "ins" : "del", {}, p.text))));
+    if (c.why) el.append(h("p", { class: "hint" }, c.why));
+    el.append(h("div", { class: "row" },
+      stale ? h("span", { class: "hint stale" }, "You've changed this since.") : h("button", { class: "primary small", title: "Use this wording (Alt+Enter)", onclick: () => { acceptText(c, c.result); } }, "Use"),
+      h("button", { class: "ghost small", onclick: dismiss }, stale ? "Dismiss" : "Not now")));
+    return el;
+  }
+  if (c.kind === "note") {
+    const found = findQuote(current.post.body, c.anchor);
+    el.append(h("p", {}, c.result.note));
+    el.append(h("div", { class: "row" },
+      found ? null : h("span", { class: "hint" }, "That passage has changed."),
+      h("button", { class: "ghost small", onclick: () => dropCard(c) }, "Done")));
+    return el;
+  }
+  if (c.kind === "next") {
+    // one compact card with a short list of directions, like a friend's "you could…"
+    const items = (Array.isArray(c.result) ? c.result : [c.result]).filter(Boolean);
+    const drop = (t) => { c.result = items.filter((x) => x !== t); if (!c.result.length) dropCard(c); else { renderCards(); persistCards(); } };
+    el.append(h("ul", { class: "nudges" }, items.map((t) => h("li", {},
+      h("button", { class: "nudge", title: "Write about this: opens a new paragraph", onmousedown: (e) => e.preventDefault(), onclick: () => { answerQuestion(t); drop(t); } }, t),
+      h("span", { class: "nudge-acts" },
+        h("button", { class: "icon-btn small", title: "Save to notes", "aria-label": "Save to notes", onclick: () => { addNote(store.blankNote("note", { text: t })); toast("Saved to notes"); drop(t); } }, "＋"),
+        h("button", { class: "icon-btn small", title: "Not now", "aria-label": "Not now", onclick: () => drop(t) }, "×"))))));
+    el.append(h("p", { class: "hint" }, items.length > 1 ? "Click one to start a paragraph on it." : "Click it to start a paragraph on it."));
+    return el;
+  }
+  // ideas and reader questions
+  const text = c.result.text;
+  el.append(h("p", {}, text));
+  el.append(h("div", { class: "row" },
+    c.sub === "question" || c.sub === "idea" ? h("button", { class: "ghost small", onmousedown: (e) => e.preventDefault(), onclick: () => { answerQuestion(text); dropCard(c); } }, c.sub === "question" ? "Answer it" : "Write this") : null,
+    h("button", { class: "ghost small", onclick: () => { addNote(store.blankNote(c.sub === "question" ? "question" : "note", { text })); toast("Saved to notes"); dropCard(c); } }, "Save to notes"),
+    h("button", { class: "link-btn small-text", onclick: dismiss }, "Not now")));
+  return el;
+}
 function cardView(c) {
   const head = h("div", { class: "card-head" },
-    h("span", { class: "card-kind" }, KIND_LABEL[c.kind]),
+    h("span", { class: "card-kind" }, c.kind === "pair" ? PAIR_LABEL[c.sub] || "Partner" : c.kind === "note" ? c.sub || "Note" : KIND_LABEL[c.kind]),
     c.scopeLabel ? h("span", { class: "card-scope" }, c.scopeLabel) : null,
     c.at && Date.now() - c.at > 3600e3 ? h("span", { class: "card-scope" }, "· " + timeAgo(c.at)) : null,
-    c.pending ? null : h("button", { class: "icon-btn small fold", "aria-label": "Fold", title: "Fold", onclick: () => { c.collapsed = true; renderCards(); persistCards(); } }, "–"),
+    c.pending || ["pair", "note", "next"].includes(c.kind) ? null : h("button", { class: "icon-btn small fold", "aria-label": "Fold", title: "Fold", onclick: () => { c.collapsed = true; renderCards(); persistCards(); } }, "–"),
     h("button", { class: "icon-btn small", "aria-label": "Dismiss", title: "Dismiss", onclick: () => { c.ctl?.abort(); dropCard(c); } }, "×"));
-  const el = h("article", { class: "card " + c.kind + (c.done ? " done" : ""), "data-card": c.id }, head);
+  const el = h("article", { class: "card " + c.kind + (c.done ? " done" : "") + (c.fresh ? " fresh" : ""), "data-card": c.id }, c.kind === "pair" && c.sub === "fix" ? null : head);
+  if (c.kind === "pair" || c.kind === "note" || c.kind === "next") return partnerCardBody(c, el);
   if (c.original && c.kind !== "review" && c.kind !== "grammar") {
     el.append(h("button", { class: "quote", title: "Show in draft", onclick: () => { const r = locate(c); if (r) selectInDraft(r.start, r.end); else toast("That text has changed in your draft."); } }, clip(c.original, 160)));
   }
@@ -1235,7 +1492,7 @@ function runGrammar() {
   const sc = getScope("grammar");
   if (sc.end <= sc.start) { toast("Put your cursor in a paragraph, or select some text."); return; }
   const original = body.slice(sc.start, sc.end);
-  runTool({ kind: "grammar", start: sc.start, end: sc.end, original, scopeLabel: sc.label }, async (signal) => {
+  runTool({ kind: "grammar", start: sc.start, end: sc.end, original, scopeLabel: sc.label, anchor: original }, async (signal) => {
     const reply = await complete({ ...P.grammarPrompt(current.post, original), signal, temperature: 0, maxTokens: Math.min(8000, 300 + original.length) });
     return parseCorrected(reply, original);
   });
@@ -1276,7 +1533,7 @@ function runGrammarAll() {
       if (out === p.text) continue;
       {
         changed++;
-        const card = { kind: "grammar", start: p.start, end: p.end, original: p.text, scopeLabel: `paragraph ${i + 1}`, result: out, id: store.newId(), at: Date.now(), batch: holder.id, postId: holder.postId };
+        const card = { kind: "grammar", start: p.start, end: p.end, original: p.text, anchor: p.text, scopeLabel: `paragraph ${i + 1}`, result: out, id: store.newId(), at: Date.now(), batch: holder.id, postId: holder.postId };
         const list = current && holder.postId === current.post.id ? cards : liveCards.get(holder.postId);
         if (list) list.splice(list.indexOf(holder) + 1, 0, card);
       }
@@ -1296,7 +1553,7 @@ function runClarify() {
   if (sc.end <= sc.start) { toast("Put your cursor in a sentence, or select some text."); return; }
   const original = body.slice(sc.start, sc.end);
   if (wordCount(original) < 4) { toast("Select a little more (a full sentence works best)."); return; }
-  runTool({ kind: "clarify", start: sc.start, end: sc.end, original, scopeLabel: sc.label }, async (signal) => {
+  runTool({ kind: "clarify", start: sc.start, end: sc.end, original, scopeLabel: sc.label, anchor: original }, async (signal) => {
     const r = await completeJSON({ ...P.clarifyPrompt(current.post, original), signal, maxTokens: 1200 });
     if (!r || typeof r !== "object") throw new Error("Unexpected reply. Try again.");
     r.options = (Array.isArray(r.options) ? r.options : []).filter((o) => o && typeof o.text === "string" && o.text.trim()).slice(0, 3);
@@ -1307,7 +1564,7 @@ function runPromptMe() {
   if (!requireModel()) return;
   const pos = lastSel.start;
   const before = current.post.body.slice(Math.max(0, pos - 1500), pos);
-  runTool({ kind: "prompt", scopeLabel: before.trim() ? "where you are" : "the whole post" }, async (signal) => {
+  runTool({ kind: "prompt", scopeLabel: before.trim() ? "where you are" : "the whole post", anchor: "end" }, async (signal) => {
     const qs = await completeJSON({ ...P.promptMePrompt(current.post, before.trim()), signal, maxTokens: 600 });
     const list = (Array.isArray(qs) ? qs : []).map(String).filter((q) => q.trim()).slice(0, 6);
     if (!list.length) throw new Error("No questions came back. Try again.");
@@ -1317,9 +1574,16 @@ function runPromptMe() {
 function runReview() {
   if (!requireModel()) return;
   if (wordCount(current.post.body) < 60) { toast("Review works best once you have a few paragraphs."); return; }
-  runTool({ kind: "review", scopeLabel: `${wordCount(current.post.body)} words` }, async (signal) => {
+  const holder = { kind: "review", scopeLabel: "reading your draft…", anchor: "top" };
+  runTool(holder, async (signal) => {
     const notes = await completeJSON({ ...P.reviewPrompt(current.post), signal, maxTokens: 2000 });
-    return (Array.isArray(notes) ? notes : []).filter((n) => n && n.quote && n.note).map((n) => ({ quote: String(n.quote).trim(), kind: String(n.kind || "note"), note: String(n.note) }));
+    const list = (Array.isArray(notes) ? notes : []).filter((n) => n && n.quote && n.note).map((n) => ({ quote: String(n.quote).trim(), kind: String(n.kind || "note"), note: String(n.note) }));
+    // turn the review into margin notes beside the passages they're about
+    const at = cards.indexOf(holder);
+    list.slice().reverse().forEach((n) => cards.splice(at + 1, 0, { kind: "note", id: store.newId(), postId: holder.postId, at: Date.now(), anchor: n.quote, original: n.quote, result: n, sub: n.kind }));
+    setTimeout(() => dropCard(holder), 0);
+    if (!list.length) toast("Your partner read it through and has no notes.");
+    return list;
   });
 }
 function runAsk() {
@@ -1329,7 +1593,8 @@ function runAsk() {
   if (!requireModel()) return;
   box.value = "";
   const history = cards.filter((c) => c.kind === "ask" && c.result).slice(0, 4).reverse().map((c) => ({ q: c.question, a: c.result }));
-  const card = { kind: "ask", question: q };
+  const m = q.match(/^About "(.+?)":/s);
+  const card = { kind: "ask", question: q, anchor: m && findQuote(current.post.body, m[1].replace(/…$/, "")) ? m[1].replace(/…$/, "") : undefined };
   let last = 0;
   runTool(card, async (signal) => (await complete({ ...P.askPrompt(current.post, q, history), signal, maxTokens: 900,
     onText: (t) => { card.partial = t; if (Date.now() - last > 120) { last = Date.now(); renderCards(); } } })).trim());
@@ -1353,6 +1618,150 @@ function runOutline() {
     if (!list.length) throw new Error("No outline came back. Try again.");
     return list;
   });
+}
+
+
+// =====================================================================
+// The pairing partner: reads along when you pause, usually stays quiet
+// =====================================================================
+const partner = { timer: 0, idleTimer: 0, ctl: null, last: 0, checked: new Map(), dirty: null };
+function partnerOn() { return store.getSettings().partner !== false && isReady(); }
+function checkedSet() {
+  const id = current.post.id;
+  if (!partner.checked.has(id)) partner.checked.set(id, new Set());
+  return partner.checked.get(id);
+}
+function setPartnerThinking(on) { $("#partnerDot")?.classList.toggle("thinking", on); }
+/** Paragraph ranges in the draft. */
+function paragraphs(body) {
+  const out = [];
+  const re = /[^\n](?:[^\n]|\n(?!\n))*/g;
+  let m;
+  while ((m = re.exec(body))) out.push({ start: m.index, end: m.index + m[0].length, text: m[0] });
+  return out;
+}
+/** When a post opens, what's already there counts as read; only new or edited paragraphs get a look. */
+function partnerSeedSeen() {
+  const seen = checkedSet();
+  for (const p of paragraphs(current.post.body)) seen.add(p.text);
+}
+/** Called on every keystroke: glance after a pause. */
+function partnerTyped() {
+  clearTimeout(partner.timer);
+  clearTimeout(partner.idleTimer);
+  if (!partnerOn()) return;
+  partner.timer = setTimeout(() => partnerCheck(), 2600);
+  const body = current.post.body;
+  if (lastSel.end >= body.trimEnd().length - 1 && wordCount(body) > 80) partner.idleTimer = setTimeout(() => runNext(true), 25000);
+}
+/** Called when the cursor moves to another paragraph: look at what you just left. */
+let lastParaStart = -1;
+function partnerMoved() {
+  if (!partnerOn()) return;
+  const here = paragraphAt(current.post.body, lastSel.end).start;
+  if (here !== lastParaStart) {
+    lastParaStart = here;
+    clearTimeout(partner.timer);
+    partner.timer = setTimeout(() => partnerCheck(), 900);
+  }
+}
+/** The next paragraph worth a look: new or edited, long enough, finished. Nearest the cursor first. */
+function nextCandidate() {
+  const body = current.post.body, seen = checkedSet(), cur = lastSel.end;
+  const list = paragraphs(body).filter((p) => !seen.has(p.text) && !/^#{1,6}\s|^```|^\s*[-*>]\s/.test(p.text) && wordCount(p.text) >= 12);
+  const done = list.filter((p) => !(cur >= p.start && cur <= p.end) || /[.!?:"')\]]\s*$/.test(p.text));
+  done.sort((a, b) => Math.min(Math.abs(a.start - cur), Math.abs(a.end - cur)) - Math.min(Math.abs(b.start - cur), Math.abs(b.end - cur)));
+  return done[0] || null;
+}
+async function partnerCheck() {
+  if (!current || !partnerOn() || document.body.classList.contains("previewing")) return;
+  const target = nextCandidate();
+  if (!target) return;
+  if (partner.ctl) { partner.timer = setTimeout(partnerCheck, 3000); return; }
+  if (Date.now() - partner.last < 5000) { partner.timer = setTimeout(partnerCheck, 5000 - (Date.now() - partner.last)); return; }
+  partner.last = Date.now();
+  const seen = checkedSet();
+  const para = target.text, body = current.post.body;
+  seen.add(para);
+  const post = current.post, postId = post.id;
+  partner.ctl = new AbortController();
+  setPartnerThinking(true);
+  try {
+    const around = body.slice(Math.max(0, target.start - 2500), Math.min(body.length, target.end + 800));
+    const res = await completeJSON({ ...P.partnerPrompt(post, para, around), signal: partner.ctl.signal, maxTokens: 900 });
+    if (!current || current.post.id !== postId) return;
+    addPartnerSuggestions(Array.isArray(res) ? res : [], para);
+  } catch (e) {
+    if (!e.cancelled) seen.delete(para);
+  } finally {
+    partner.ctl = null;
+    setPartnerThinking(false);
+    refreshModelButton();
+    // more edited paragraphs waiting? keep going while the writer is still paused
+    if (current && current.post.id === postId && nextCandidate()) partner.timer = setTimeout(partnerCheck, 4000);
+  }
+}
+function addPartnerSuggestions(list, para) {
+  const body = current.post.body;
+  const dismissed = current.post.partnerDismissed || [];
+  const added = [];
+  for (const s of list.slice(0, 2)) {
+    if (!s || typeof s !== "object") continue;
+    const type = String(s.type || "").toLowerCase();
+    if (type === "better" || type === "fix") {
+      const quote = String(s.quote || "").trim(), sugg = String(s.suggestion || "").trim();
+      if (!quote || !sugg || quote === sugg) continue;
+      if (!findQuote(para, quote)) continue;
+      const at = findQuote(body, quote);
+      if (!at) continue;
+      const exact = body.slice(at.start, at.end);
+      if (dismissed.includes(exact.slice(0, 80))) continue;
+      // A typo fix should be small; short quotes ("its" → "it's") are always fine.
+      if (type === "fix" && wordCount(exact) > 3 && changeRatio(exact, sugg) > 0.5) continue;
+      added.push({ kind: "pair", sub: type, original: exact, start: at.start, end: at.end, anchor: exact, result: sugg, why: String(s.why || "") });
+    } else if (type === "idea" || type === "question") {
+      const text = String(s.text || "").trim();
+      if (!text) continue;
+      const anchor = para.slice(0, 120);
+      if (dismissed.includes(anchor.slice(0, 80)) && type === "idea") continue;
+      added.push({ kind: "pair", sub: type, anchor, result: { text } });
+    }
+  }
+  if (!added.length) { $("#partnerDot")?.classList.add("nod"); setTimeout(() => $("#partnerDot")?.classList.remove("nod"), 900); return; }
+  // newer thoughts about a paragraph replace older ones about the same paragraph
+  cards = cards.filter((c) => !(c.kind === "pair" && !c.done && para.includes((c.anchor || "").slice(0, 60))));
+  for (const c of added.reverse()) { c.id = store.newId(); c.postId = current.post.id; c.at = Date.now(); c.fresh = true; cards.unshift(c); }
+  // keep the margin calm: at most six open suggestions
+  const open = cards.filter((c) => c.kind === "pair" && !c.done);
+  for (const c of open.slice(6)) cards.splice(cards.indexOf(c), 1);
+  renderCards();
+  persistCards();
+  setTimeout(() => cards.forEach((c) => (c.fresh = false)), 1200);
+}
+async function runNext(auto = false) {
+  if (!auto && !requireModel()) return;
+  if (auto && (!partnerOn() || cards.some((c) => c.kind === "next" && Date.now() - c.at < 180e3))) return;
+  const post = current.post, postId = post.id;
+  if (auto) setPartnerThinking(true);
+  try {
+    const list = await completeJSON({ ...P.nextPrompt(post), maxTokens: 700 });
+    if (!current || current.post.id !== postId) return;
+    cards = cards.filter((c) => c.kind !== "next");
+    const items = (Array.isArray(list) ? list : []).map((t) => String(t).trim()).filter(Boolean).slice(0, 3);
+    if (!items.length) { if (!auto) toast("Your partner had nothing new to add. Keep going!"); return; }
+    cards.unshift({ kind: "next", id: store.newId(), postId, at: Date.now(), anchor: "end", result: items, fresh: true });
+    renderCards(); persistCards();
+  } catch (e) { if (!auto) toast(e.message, { error: true }); }
+  finally { if (auto) setPartnerThinking(false); }
+}
+/** Opening an empty post: offer a few ways to start. */
+function partnerHello() {
+  const p = current.post;
+  partnerSeedSeen();
+  lastParaStart = paragraphAt(p.body, lastSel.end).start;
+  if (p.body.trim() || p.helloDone || !partnerOn() || cards.length) return;
+  p.helloDone = true;
+  setTimeout(() => { if (current?.post === p && !p.body.trim()) runNext(true); }, 1200);
 }
 
 // ---------- versions ----------

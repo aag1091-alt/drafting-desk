@@ -123,6 +123,7 @@ export function importPost(obj) {
     notes: (Array.isArray(src.notes) ? src.notes : []).map((n) => ({
       ...blankNote(["note", "source", "question"].includes(n.kind) ? n.kind : "note"),
       text: String(n.text || ""), url: String(n.url || ""), title: String(n.title || ""),
+      ...(n.anchor ? { anchor: String(n.anchor).slice(0, 600) } : {}),
     })),
     snapshots: (Array.isArray(src.snapshots) ? src.snapshots : []).slice(-30).map((s) => ({
       id: newId(), at: Number(s.at) || Date.now(), label: String(s.label || ""), body: String(s.body || ""),

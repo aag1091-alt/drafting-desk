@@ -97,6 +97,51 @@ export function descriptionPrompt(post) {
   };
 }
 
+/** The pairing partner: glances at the paragraph the writer just worked on and usually stays quiet. */
+export function partnerPrompt(post, paragraph, around) {
+  return {
+    system: `${HELPER}
+
+You are the writer's pairing partner, sitting beside them while they draft. You glance at the paragraph they just wrote and, only when it's genuinely useful, say one or two short things, the way a good colleague would lean over and say "this line might land better as…" or "you could mention…". Most of the time the right answer is to say nothing. Never write new paragraphs or sentences of content for them.
+
+VOICE GUIDE (rewrites must sound like this writer):
+${post.voice}`,
+    prompt: `POST TITLE: ${post.title}
+
+THE DRAFT AROUND THE PARAGRAPH (for context only):
+${around}
+
+THEIR NOTES:
+${notesText(post, 2000)}
+
+THE PARAGRAPH THEY JUST WROTE:
+<paragraph>
+${paragraph}
+</paragraph>
+
+Return 0, 1 or 2 suggestions about THIS paragraph, best first. Allowed types:
+- "better": one sentence that would read noticeably better. "quote" = that sentence copied exactly from the paragraph; "suggestion" = your version, keeping their words, meaning and voice (no new facts); "why" = under 12 words.
+- "fix": a clear spelling or grammar mistake. "quote" = the shortest exact phrase containing it; "suggestion" = the corrected phrase.
+- "idea": something specific worth adding right here (a point, an example, a number from their notes, a counterpoint). "text" = a short nudge under 25 words, phrased as a suggestion to the writer, not as text to paste.
+- "question": a question a reader would ask at this point that the paragraph doesn't answer. "text" = the question, under 20 words.
+
+Skip anything minor or stylistic nitpicking. If the paragraph is fine, return []. Reply with only JSON: [{"type": ..., "quote": ..., "suggestion": ..., "why": ..., "text": ...}]`,
+  };
+}
+
+/** Nudges about where to go next, when the writer pauses at the end of the draft. */
+export function nextPrompt(post) {
+  return {
+    system: `${HELPER}\n\nYou are the writer's pairing partner. You suggest directions, never text to paste.`,
+    prompt: `${context(post, 8000)}
+
+THEIR NOTES:
+${notesText(post, 3000)}
+
+The writer has paused at the end of the draft. Offer 2 or 3 short nudges about what they could write next: a topic from their notes they haven't covered, a natural next step in the argument, an example a reader would want, or a question to answer. Each under 25 words, addressed to the writer ("You could…", "Readers will wonder…"). Reply with only a JSON array of strings.`,
+  };
+}
+
 export function voicePrompt(samples) {
   return {
     system: "You are an editor who describes a writer's voice precisely enough that another writer could imitate it.",

@@ -6,26 +6,32 @@ It's a static web app with no server and no account. Your posts live only in you
 
 ## How it works
 
-You type the draft. The assistant suggests, and nothing changes in your draft until you accept it. Accepted changes go through the browser's own Undo, so Cmd/Ctrl+Z still works.
+The page is mostly writing space. On the right sits your **partner**, which reads along like a pairing partner and leaves short notes in the margin beside the paragraph they're about:
+
+- **Reads better as**: a wording close to yours, with only the changed words shown. Click Use, or Not now.
+- **Typo**: a one-line fix with the word underlined in your text.
+- **You could add / A reader might ask**: ideas and questions; click one to start a paragraph on it, or save it to notes.
+- **What next**: when you pause at the end, two or three directions you could take, drawn from your notes.
+
+It only chimes in when you pause, only about paragraphs you've just written or changed, and stays quiet if it has nothing useful. Turn off **Chime in** and it waits until you ask. Nothing changes in your draft until you accept, and accepted changes go through the browser's own Undo (Cmd/Ctrl+Z).
+
+Select any words in your draft and a toolbar appears:
 
 | Tool | What it does | Shortcut |
 | --- | --- | --- |
-| Fix grammar | Spelling, grammar and punctuation only, shown as a word-level diff. Shift-click checks the whole draft. | Cmd/Ctrl+Alt+1 |
-| Make it clearer | Says what a reader might trip on and offers two or three wordings close to yours. | Cmd/Ctrl+Alt+2 |
-| I'm stuck | Questions about what to say next, based on your draft and notes. You answer in your own words. | Cmd/Ctrl+Alt+3 |
-| Review draft | An editor's margin notes on the whole draft, highlighted in your text. No rewrites. | Cmd/Ctrl+Alt+4 |
-| Ask | Ask anything about your draft ("does my intro earn the claim?"). It answers like an editor and won't write paragraphs for you. | Enter in the Ask box |
+| Fix grammar | Spelling, grammar and punctuation only. You see every change before accepting. | Cmd/Ctrl+Alt+1 |
+| Make it clearer | What a reader might trip on, with wordings close to yours to pick from. | Cmd/Ctrl+Alt+2 |
+| I'm stuck | Questions that get you thinking. You answer them in your own words. | Cmd/Ctrl+Alt+3 |
+| Review draft | An editor's notes on the whole draft, highlighted in your text. | Cmd/Ctrl+Alt+4 |
+| Ask | Ask your partner anything about the passage. It answers like an editor and won't write paragraphs for you. | |
+| Note | Attach a note to those words. | |
 
-Select some text and the tools appear right next to it; otherwise they act on the paragraph (sentence, for Make it clearer) your cursor is in. Cmd/Ctrl+B, I and K add bold, italic and links. Assistant results stay saved with the post.
+Under the partner:
 
-Beside the draft:
-
-- **Notes & research**: notes, sources with links (paste an excerpt and summarize it), saved questions, search, "Answer in draft", and "Suggest outline" built only from your notes.
-- **Versions**: saved when you open a post, before any big deletion, every 20 minutes of writing, and on demand. Compare any version with now, paragraph by paragraph (moved paragraphs are recognized), and copy back a single paragraph.
-- **Finishing**: Title ideas built from phrases you already wrote, a description helper, tags, a "Before you publish" checklist, live Preview, and Export to Markdown with Jekyll front matter (plus your own front-matter template with `{{slug}}`, `{{date}}`, `{{title}}`). In Chrome and Edge you can save straight into your blog's `_posts` or `_drafts` folder.
-- **Your words**: a counter of how much of the draft is your own wording (accepted rewordings count against it; grammar fixes don't).
-- **Import** Markdown files (front matter is read) or a JSON backup; a reminder nudges you to back up, since posts live only in this browser.
-- **Focus** hides everything but the draft. Works on phones.
+- **Notes & research**: notes, sources with links (paste an excerpt and summarize it), saved questions, search, and "Suggest outline" built only from your notes. Notes can be **linked to text**: attach one from the selection toolbar, or select words and click "Link to text" on an existing note. Linked passages get a dotted underline; hovering the note lights up the passage, clicking its quote jumps there, and putting your cursor in the passage highlights the note.
+- **Versions**: saved when you open a post, before any big deletion, every 20 minutes of writing, and on demand. Compare any version with now, paragraph by paragraph, and copy back a single paragraph.
+- **Finishing**: Title ideas built from phrases you already wrote, a description helper, tags, a "Before you publish" checklist, Preview, and Export to Markdown with Jekyll front matter (plus your own front-matter template with `{{slug}}`, `{{date}}`, `{{title}}`). In Chrome and Edge you can save straight into your blog's `_posts` or `_drafts` folder.
+- **Focus** hides everything but the draft (Esc to leave). On phones the partner sits below your text, and a small badge tells you when it has something.
 
 ## Bring your own model
 
