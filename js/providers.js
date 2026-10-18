@@ -1,5 +1,5 @@
 // Model providers, all called straight from the browser. No proxy, no server.
-import { getSecret, setSecret, getSettings } from "./store.js";
+import { getSecret, setSecret, getSettings } from "./store.js?v=__V__";
 
 export const PROVIDERS = {
   openrouter: {

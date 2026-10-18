@@ -1,8 +1,8 @@
-import * as store from "./store.js";
-import { PROVIDERS, startOpenRouterLogin, finishOpenRouterLogin, isReady, listModels, complete, completeJSON } from "./providers.js";
-import * as P from "./prompts.js";
-import { renderMarkdown, postToMarkdown, slugify, wordCount } from "./markdown.js";
-import { wordDiff, addedChars, changeCount } from "./diff.js";
+import * as store from "./store.js?v=__V__";
+import { PROVIDERS, startOpenRouterLogin, finishOpenRouterLogin, isReady, listModels, complete, completeJSON } from "./providers.js?v=__V__";
+import * as P from "./prompts.js?v=__V__";
+import { renderMarkdown, postToMarkdown, slugify, wordCount } from "./markdown.js?v=__V__";
+import { wordDiff, addedChars, changeCount } from "./diff.js?v=__V__";
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const app = $("#app");
