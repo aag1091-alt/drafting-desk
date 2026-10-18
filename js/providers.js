@@ -247,6 +247,10 @@ export async function complete(opts) {
 async function completeOnce({ system, prompt, onText, signal, maxTokens = 2000, temperature }) {
   const settings = getSettings();
   const p = settings.provider;
+  // Hosted models may think before answering, and thinking counts against the
+  // limit; give generous headroom (you only pay for what's used).
+  const budget = p === "ollama" || p === "custom" ? maxTokens : maxTokens + 6000;
+  let stopReason = "";
   const model = settings.models[p];
   const key = getSecret(p);
   const label = PROVIDERS[p]?.label || p;
@@ -268,7 +272,7 @@ async function completeOnce({ system, prompt, onText, signal, maxTokens = 2000, 
         headers: anthropicHeaders(key),
         body: JSON.stringify({
           model,
-          max_tokens: maxTokens,
+          max_tokens: budget,
           stream: true,
           ...(temperature != null ? { temperature } : {}),
           ...(system ? { system } : {}),
@@ -279,8 +283,10 @@ async function completeOnce({ system, prompt, onText, signal, maxTokens = 2000, 
       await readSSE(res, (d) => {
         const ev = JSON.parse(d);
         if (ev.type === "content_block_delta" && ev.delta?.type === "text_delta") push(ev.delta.text);
+        if (ev.type === "message_delta" && ev.delta?.stop_reason) stopReason = ev.delta.stop_reason;
         if (ev.type === "error") throw new Error(ev.error?.message || "Anthropic stream error");
       }, signal);
+      checkComplete(stopReason === "max_tokens", full);
       return full;
     }
 
@@ -294,7 +300,7 @@ async function completeOnce({ system, prompt, onText, signal, maxTokens = 2000, 
       body: JSON.stringify({
         model, messages, stream: true,
         ...(temperature != null && !(p === "openai" && /^o\d/.test(model)) ? { temperature } : {}),
-        ...(p === "openai" ? { max_completion_tokens: maxTokens } : { max_tokens: maxTokens }),
+        ...(p === "openai" ? { max_completion_tokens: budget } : { max_tokens: budget }),
       }),
     });
     if (!res.ok) throw await failure(res, label);
@@ -302,7 +308,9 @@ async function completeOnce({ system, prompt, onText, signal, maxTokens = 2000, 
       const ev = JSON.parse(d);
       if (ev.error) throw new Error(ev.error.message || "Stream error");
       push(ev.choices?.[0]?.delta?.content || "");
+      if (ev.choices?.[0]?.finish_reason) stopReason = ev.choices[0].finish_reason;
     }, signal);
+    checkComplete(stopReason === "length", full);
     return full;
   } catch (e) {
     if (e.name === "AbortError") {
@@ -325,6 +333,15 @@ async function completeOnce({ system, prompt, onText, signal, maxTokens = 2000, 
     e.partial = full;
     throw e;
   }
+}
+
+/** A reply that hit the length limit is incomplete; never hand it to the UI as if it were whole. */
+function checkComplete(truncated, full) {
+  if (!truncated) return;
+  const err = new Error("The reply was cut short before it finished. Try a shorter selection, or try again.");
+  err.partial = full;
+  err.truncated = true;
+  throw err;
 }
 
 /** Ask for JSON; tolerant of code fences or a sentence around it. */
