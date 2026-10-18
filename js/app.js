@@ -244,8 +244,10 @@ function renderEditor(post) {
   document.title = `${post.title} · Drafting Desk`;
   const s = { ...store.getSettings(), notesOpen: notesOpen() };
 
-  const title = h("input", { class: "post-title-input", "aria-label": "Post title", value: post.title,
-    oninput: (e) => { post.title = e.target.value; document.title = `${post.title} · Drafting Desk`; scheduleSave(); } });
+  const title = h("textarea", { class: "post-title-input", rows: "1", "aria-label": "Post title", placeholder: "Title",
+    oninput: (e) => { post.title = e.target.value.replace(/\n/g, " "); document.title = `${post.title} · Drafting Desk`; growTitle(e.target); scheduleSave(); },
+    onkeydown: (e) => { if (e.key === "Enter") { e.preventDefault(); draft().focus(); } } });
+  title.value = post.title;
 
   const status = h("select", { class: "status-select", "aria-label": "Status", title: "Where this post is at", onchange: (e) => { post.status = e.target.value; scheduleSave(); } },
     store.STATUSES.map((st) => h("option", { value: st, selected: post.status === st }, st)));
@@ -297,6 +299,7 @@ function renderEditor(post) {
         h("div", { class: "draft-wrap" }, h("div", { class: "draft backdrop", id: "backdrop", "aria-hidden": "true" }), ta, selectionBar())),
       assistantPanel())));
   autogrow();
+  growTitle($(".post-title-input"));
   updateStats();
   updateScope();
   updateContents();
@@ -304,6 +307,11 @@ function renderEditor(post) {
   if (!post.body) ta.focus();
 }
 
+function growTitle(el) {
+  if (!el) return;
+  el.style.height = "auto";
+  el.style.height = el.scrollHeight + "px";
+}
 function guideStrip() {
   const s = store.getSettings();
   if (s.guideDone) return null;
@@ -335,7 +343,8 @@ function updateSelBar() {
   if (!bar || !ta) return;
   const { start, end } = lastSel;
   const text = ta.value.slice(start, end);
-  if (end - start < 3 || !text.trim() || document.activeElement !== ta || !isReady() || dismissedSel === `${start}:${end}`) { bar.hidden = true; return; }
+  const small = window.matchMedia("(max-width: 760px), (pointer: coarse)").matches;
+  if (small || end - start < 3 || !text.trim() || document.activeElement !== ta || !isReady() || dismissedSel === `${start}:${end}`) { bar.hidden = true; return; }
   const pos = caretPoint(ta, start);
   bar.hidden = false;
   const w = bar.offsetWidth;
