@@ -268,10 +268,17 @@ function renderEditor(post) {
         h("a", { class: "brand", href: "#/", title: "All posts" }, h("span", { class: "brand-mark", "aria-hidden": "true" }), h("span", { class: "brand-text" }, "Drafting Desk")),
         h("a", { class: "back-link", href: "#/" }, "← All posts")),
       h("div", { class: "topbar-actions" },
-        h("button", { class: "ghost", id: "focusBtn", onclick: toggleFocus, title: "Hide side panels" }, "Focus"),
-        h("button", { class: "ghost", onclick: openVersions }, "Versions"),
-        h("button", { class: "ghost", onclick: openVoice, title: "Describe how you write, so suggestions sound like you" }, "Your voice"),
-        h("button", { class: "ghost", onclick: openExport }, "Export"),
+        h("button", { class: "ghost wide-only", id: "focusBtn", onclick: toggleFocus, title: "Hide side panels" }, "Focus"),
+        h("button", { class: "ghost wide-only", onclick: openVersions }, "Versions"),
+        h("button", { class: "ghost wide-only", onclick: openVoice, title: "Describe how you write, so suggestions sound like you" }, "Your voice"),
+        h("button", { class: "ghost wide-only", onclick: openExport }, "Export"),
+        h("details", { class: "more-menu narrow-only" },
+          h("summary", { class: "ghost" }, "More"),
+          h("div", { class: "more-list" },
+            h("button", { onclick: (e) => { e.target.closest("details").open = false; openExport(); } }, "Export"),
+            h("button", { onclick: (e) => { e.target.closest("details").open = false; openVersions(); } }, "Versions"),
+            h("button", { onclick: (e) => { e.target.closest("details").open = false; openVoice(); } }, "Your voice"),
+            h("button", { onclick: (e) => { e.target.closest("details").open = false; location.hash = "#/"; } }, "All posts"))),
         modelButton())),
     h("main", { class: "editor-main" },
     h("div", { class: "editor-head" },
@@ -319,7 +326,8 @@ function growTitle(el) {
 function guideStrip() {
   const s = store.getSettings();
   if (s.guideDone) return null;
-  const el = h("div", { class: "guide", id: "guide", role: "note", "aria-label": "How this works" }, h("ol", {},
+  const narrow = window.matchMedia("(max-width: 760px)").matches;
+  const el = h("details", { class: "guide", id: "guide", open: !narrow }, h("summary", { class: "guide-summary" }, "How this works"), h("ol", {},
     h("li", {}, h("strong", {}, "Write"), " in your own words. Rough is fine; nothing is sent anywhere while you type."),
     h("li", {}, h("strong", {}, "Stuck?"), " Press ", h("em", {}, "I'm stuck"), " for questions that get you going."),
     h("li", {}, h("strong", {}, "Select a sentence"), " to fix its grammar or make it clearer. You approve every change."),
@@ -517,7 +525,7 @@ function updateHighlights() {
         const at = findQuote(text, r.quote);
         if (at) ranges.push({ ...at, cls: "hl-review" });
       });
-      if ((c.kind === "grammar" || c.kind === "clarify") && !c.done && c.original && c.result !== c.original) {
+      if ((c.kind === "grammar" || c.kind === "clarify") && !c.done && c.original && c.result !== c.original && !isCollapsed(c, cards.indexOf(c))) {
         const r = locate(c);
         if (r) ranges.push({ ...r, cls: "hl-suggest" });
       }
@@ -790,7 +798,7 @@ function renderCards() {
   const box = $("#cards");
   if (!box) return;
   $("#clearCards").hidden = !cards.length;
-  box.replaceChildren(...(cards.length ? cards.map(cardView) : [assistIntro()]));
+  box.replaceChildren(...(cards.length ? cards.map((c, i) => (isCollapsed(c, i) ? cardSummary(c) : cardView(c))) : [assistIntro()]));
 }
 function persistCards() {
   if (!current) return;
@@ -824,11 +832,27 @@ function requireModel() {
 }
 const KIND_LABEL = { titles: "Title ideas",  grammar: "Grammar", clarify: "Make it clearer", prompt: "I'm stuck", review: "Review", outline: "Outline", ask: "Ask" };
 
+const AUTO_FOLD = new Set(["grammar", "clarify", "titles", "outline", "prompt"]);
+function isCollapsed(c, i) {
+  if (c.pending || c.error) return false;
+  if (c.collapsed != null) return c.collapsed;
+  if (c.batch) return !!c.done; // whole-draft results stay open until handled
+  return c.done || (i > 0 && AUTO_FOLD.has(c.kind));
+}
+function cardSummary(c) {
+  const status = c.done ? "applied" : c.kind === "grammar" && c.result === c.original ? "no issues" : c.kind === "review" ? `${(c.result || []).length} notes` : "";
+  const what = c.question || c.original || c.scopeLabel || "";
+  return h("button", { class: "card-summary", "data-card": c.id, title: "Show this result", onclick: () => { c.collapsed = false; renderCards(); persistCards(); } },
+    h("span", { class: "card-kind" }, KIND_LABEL[c.kind]),
+    h("span", { class: "card-what" }, clip(what.replace(/\s+/g, " "), 60)),
+    status ? h("span", { class: "card-status" + (c.done ? " ok-text" : "") }, status) : null);
+}
 function cardView(c) {
   const head = h("div", { class: "card-head" },
     h("span", { class: "card-kind" }, KIND_LABEL[c.kind]),
     c.scopeLabel ? h("span", { class: "card-scope" }, c.scopeLabel) : null,
     c.at && Date.now() - c.at > 3600e3 ? h("span", { class: "card-scope" }, "· " + timeAgo(c.at)) : null,
+    c.pending ? null : h("button", { class: "icon-btn small fold", "aria-label": "Fold", title: "Fold", onclick: () => { c.collapsed = true; renderCards(); persistCards(); } }, "–"),
     h("button", { class: "icon-btn small", "aria-label": "Dismiss", title: "Dismiss", onclick: () => { c.ctl?.abort(); dropCard(c); } }, "×"));
   const el = h("article", { class: "card " + c.kind + (c.done ? " done" : ""), "data-card": c.id }, head);
   if (c.original && c.kind !== "review" && c.kind !== "grammar") {
@@ -1044,7 +1068,7 @@ function runGrammarAll() {
       const out = parseCorrected(reply, p.text);
       if (out !== p.text) {
         changed++;
-        const card = { kind: "grammar", start: p.start, end: p.end, original: p.text, scopeLabel: `paragraph ${i + 1}`, result: out, id: store.newId() };
+        const card = { kind: "grammar", start: p.start, end: p.end, original: p.text, scopeLabel: `paragraph ${i + 1}`, result: out, id: store.newId(), at: Date.now(), batch: holder.id };
         cards.splice(cards.indexOf(holder) + 1, 0, card);
       }
     }

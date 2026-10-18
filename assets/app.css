@@ -318,3 +318,31 @@ body.focus .guide { display: none; }
 .quote.missing { cursor: default; font-style: italic; color: var(--muted); margin: 0; }
 .back-link { color: var(--muted); font-size: 13px; text-decoration: none; margin-left: 12px; }
 .back-link:hover { color: var(--accent); }
+
+.card-summary { all: unset; box-sizing: border-box; cursor: pointer; display: flex; gap: 8px; align-items: baseline; width: 100%; padding: 7px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); font-size: 13px; }
+.card-summary:hover, .card-summary:focus-visible { border-color: var(--accent); }
+.card-summary .card-kind { flex: none; font-size: 11px; }
+.card-what { flex: 1; min-width: 0; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card-status { flex: none; font-size: 12px; color: var(--muted); }
+.card-head .fold { margin-left: auto; }
+.card-head .fold + .icon-btn { margin-left: 0; }
+.more-menu { position: relative; }
+.more-menu summary { list-style: none; cursor: pointer; display: inline-block; }
+.more-menu summary::-webkit-details-marker { display: none; }
+.more-list { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); display: flex; flex-direction: column; min-width: 160px; padding: 4px; }
+.more-list button { all: unset; cursor: pointer; padding: 9px 12px; border-radius: 6px; font-size: 15px; }
+.more-list button:hover, .more-list button:focus-visible { background: var(--sunk); }
+.narrow-only { display: none; }
+@media (max-width: 760px) {
+  .wide-only { display: none !important; }
+  .narrow-only { display: block; }
+  .topbar-actions { overflow: visible; }
+  .toolbar { flex-wrap: wrap; overflow: visible; }
+  .toolbar .tools { flex-wrap: wrap; }
+  .back-link { display: none; }
+}
+
+.guide-summary { cursor: pointer; font-weight: 600; font-size: 14px; list-style: none; }
+.guide-summary::-webkit-details-marker { display: none; }
+.guide[open] .guide-summary { display: none; }
+.guide:not([open]) { padding: 8px 14px; }
