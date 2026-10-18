@@ -370,7 +370,12 @@ function renderEditor(post) {
   if (!post.body) ta.focus();
   else {
     ta.setSelectionRange(lastSel.start, lastSel.end);
-    if (!window.matchMedia("(pointer: coarse)").matches) { ta.focus({ preventScroll: true }); requestAnimationFrame(() => keepCaretVisible(true)); }
+    if (!window.matchMedia("(pointer: coarse)").matches) {
+      const y0 = window.scrollY;
+      ta.focus({ preventScroll: true });
+      window.scrollTo(0, y0); // setting the selection can scroll on its own; only scroll if the cursor is off screen
+      requestAnimationFrame(() => keepCaretVisible(true));
+    }
   }
 }
 
@@ -532,7 +537,11 @@ function keepCaretVisible(center = false) {
     const top = caretOffset(ta, ta.selectionEnd);
     const y = ta.getBoundingClientRect().top + top;
     const lh = parseFloat(getComputedStyle(ta).lineHeight) || 30;
-    if (center) { if (y > window.innerHeight * 0.7 || y < 0) window.scrollBy(0, y - window.innerHeight / 2); return; }
+    if (center) {
+      if (y < 0) window.scrollBy(0, y - 120);
+      else if (y + lh > window.innerHeight - 24) window.scrollBy(0, y + lh - window.innerHeight + 140);
+      return;
+    }
     const bottomRoom = window.innerHeight - 48;
     if (y + lh > bottomRoom) window.scrollBy(0, y + lh - bottomRoom);
     else if (y < 64) window.scrollBy(0, y - 64);
