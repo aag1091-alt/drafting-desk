@@ -472,6 +472,8 @@ function onDraftInput(e) {
   if (removed > 200) { addSnapshot("Before deleting " + removed.toLocaleString() + " characters", p.body); toast("The deleted text is kept in Versions", { action: { label: "Versions", run: openVersions } }); }
   else if (Date.now() - lastTimedVersion > 20 * 60e3 && p.body.trim()) { addSnapshot("While writing"); lastTimedVersion = Date.now(); }
   p.body = e.target.value;
+  const nx = cards.find((c) => c.kind === "next");
+  if (nx && !nx.staleShown && nextIsStale(nx)) { nx.staleShown = true; setTimeout(renderCards, 0); }
   // answers you've read fold away once you're writing again
   const readAnswers = cards.filter((c) => ["ask", "titles", "outline"].includes(c.kind) && !c.pending && !c.error && c.collapsed !== true && Date.now() - c.at > 3000);
   if (readAnswers.length) { readAnswers.forEach((c) => { c.collapsed = true; }); setTimeout(() => { renderCards(); persistCards(); }, 0); }
@@ -642,7 +644,19 @@ function updateHighlights() {
       if (c.pending || c.error) continue;
       if ((c.kind === "pair" || c.kind === "note") && !c.done) {
         const r = c.kind === "note" ? findQuote(text, c.anchor) : locate(c) || findQuote(text, c.anchor);
-        if (r) ranges.push({ ...r, cls: c.kind === "note" ? "hl-review" : c.sub === "fix" ? "hl-fix" : "hl-quiet", id: c.id });
+        if (r && c.sub === "fix") {
+          // underline just the words the fix changes, like a spellchecker
+          let at = r.start, any = false;
+          const parts = wordDiff(c.original, c.result);
+          parts.forEach((p, k) => {
+            if (p.type === "same") { at += p.text.length; return; }
+            if (p.type === "del") { if (p.text.trim()) { ranges.push({ start: at, end: at + p.text.length, cls: "hl-fix", id: c.id }); any = true; } at += p.text.length; return; }
+            // pure insertion (a missing comma): mark the word before it
+            if (parts[k - 1]?.type !== "del") { const w = text.slice(0, at).match(/\S+\s*$/); if (w) { ranges.push({ start: at - w[0].length, end: at - (w[0].length - w[0].trimEnd().length), cls: "hl-fix", id: c.id }); any = true; } }
+          });
+          if (!any) ranges.push({ ...r, cls: "hl-fix", id: c.id });
+          ranges.push({ ...r, cls: "hl-quiet", id: c.id });
+        } else if (r) ranges.push({ ...r, cls: c.kind === "note" ? "hl-review" : "hl-quiet", id: c.id });
         continue;
       }
       if (c.kind === "review") (c.result || []).forEach((r, i) => {
@@ -1286,7 +1300,10 @@ function partnerCardBody(c, el) {
       h("span", { class: "nudge-acts" },
         h("button", { class: "icon-btn small", title: "Save to notes", "aria-label": "Save to notes", onclick: () => { addNote(store.blankNote("note", { text: t })); toast("Saved to notes"); drop(t); } }, "＋"),
         h("button", { class: "icon-btn small", title: "Not now", "aria-label": "Not now", onclick: () => drop(t) }, "×"))))));
-    el.append(h("p", { class: "hint" }, items.length > 1 ? "Click one to start a paragraph on it." : "Click it to start a paragraph on it."));
+    if (nextIsStale(c)) {
+      el.classList.add("stale");
+      el.append(h("p", { class: "hint row between" }, "From earlier in your draft.", h("button", { class: "link-btn", onclick: () => runNext() }, "↻ Fresh ideas")));
+    } else el.append(h("p", { class: "hint" }, items.length > 1 ? "Click one to start a paragraph on it." : "Click it to start a paragraph on it."));
     return el;
   }
   // ideas and reader questions
@@ -1732,7 +1749,7 @@ function partnerTyped() {
   if (!partnerOn()) return;
   partner.timer = setTimeout(() => partnerCheck(), 2600);
   const body = current.post.body;
-  if (lastSel.end >= body.trimEnd().length - 1 && wordCount(body) > 80) partner.idleTimer = setTimeout(() => runNext(true), 25000);
+  if (lastSel.end >= body.trimEnd().length - 1 && wordCount(body) > 40) partner.idleTimer = setTimeout(() => runNext(true), nextIsStale() ? 9000 : 25000);
 }
 /** Called when the cursor moves to another paragraph: look at what you just left. */
 let lastParaStart = -1;
@@ -1820,7 +1837,7 @@ function addPartnerSuggestions(list, para) {
 }
 async function runNext(auto = false) {
   if (!auto && !requireModel()) return;
-  if (auto && (!partnerOn() || cards.some((c) => c.kind === "next" && Date.now() - c.at < 180e3))) return;
+  if (auto && (!partnerOn() || cards.some((c) => c.kind === "next" && Date.now() - c.at < 180e3 && !nextIsStale(c)))) return;
   const post = current.post, postId = post.id;
   const btn = $(".next-btn");
   setPartnerThinking(true);
@@ -1831,10 +1848,14 @@ async function runNext(auto = false) {
     cards = cards.filter((c) => c.kind !== "next");
     const items = (Array.isArray(list) ? list : []).map((t) => String(t).trim()).filter(Boolean).slice(0, 3);
     if (!items.length) { if (!auto) toast("Your partner had nothing new to add. Keep going!"); return; }
-    cards.unshift({ kind: "next", id: store.newId(), postId, at: Date.now(), anchor: "end", result: items, fresh: true });
+    cards.unshift({ kind: "next", id: store.newId(), postId, at: Date.now(), anchor: "end", result: items, fresh: true, words: wordCount(post.body) });
     renderCards(); persistCards();
   } catch (e) { if (!auto) toast(e.message, { error: true }); }
   finally { setPartnerThinking(false); if (btn) { btn.disabled = false; btn.textContent = "✦ What next?"; } }
+}
+/** "What next" ideas go stale once you've written a good deal more since. */
+function nextIsStale(c = cards.find((x) => x.kind === "next")) {
+  return !!c && c.kind === "next" && wordCount(current.post.body) - (c.words ?? 0) >= 50;
 }
 /** Opening an empty post: offer a few ways to start. */
 function partnerHello() {
