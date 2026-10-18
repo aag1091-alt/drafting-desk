@@ -253,3 +253,11 @@ dialog:has(.narrow) { width: min(420px, calc(100vw - 32px)); }
 .capture { display: flex; flex-direction: column; gap: 8px; }
 .capture-label { font-size: 14px; color: var(--muted); }
 .capture input { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); padding: 8px 10px; }
+
+.ask { display: flex; gap: 6px; align-items: flex-end; }
+.ask textarea { font: 14px/1.45 var(--sans); padding: 7px 9px; resize: none; }
+.asked { margin: 0; font-weight: 600; }
+.answer { font-size: 14px; line-height: 1.55; }
+.answer p, .answer ul, .answer ol { margin: 0 0 0.6em; }
+.answer ul, .answer ol { padding-left: 18px; }
+.answer h2, .answer h3, .answer h4 { font-size: 14px; margin: 0.6em 0 0.3em; }

@@ -75,6 +75,14 @@ Suggest an outline for the post using only the writer's ideas above: 4 to 7 sect
   };
 }
 
+export function askPrompt(post, question, history = []) {
+  const prior = history.slice(-4).map((t) => `Q: ${t.q}\nA: ${t.a}`).join("\n\n");
+  return {
+    system: `${HELPER}\n\nThe writer is asking you a question about their post. Answer like a thoughtful editor in a few short sentences or a short list. You may quote their draft. Do not write paragraphs or sections for them; if they ask you to, explain what the passage needs and ask them a question that helps them write it themselves. A suggested phrase of a few words is fine.`,
+    prompt: `${context(post, 12000)}\n\nTHEIR NOTES AND RESEARCH:\n${notesText(post)}\n\n${prior ? `EARLIER IN THIS CONVERSATION:\n${prior}\n\n` : ""}THEIR QUESTION:\n${question}`,
+  };
+}
+
 export function voicePrompt(samples) {
   return {
     system: "You are an editor who describes a writer's voice precisely enough that another writer could imitate it.",

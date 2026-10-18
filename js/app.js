@@ -76,7 +76,7 @@ function route() {
   if (m) {
     const post = store.getPost(m[1]);
     if (!post) { location.hash = "#/"; return; }
-    if (current?.post.id !== post.id) cards = [];
+    if (current?.post.id !== post.id) cards = (post.cards || []).filter((c) => !c.pending && !c.error);
     renderEditor(post);
   } else {
     current = null;
@@ -596,7 +596,11 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape" && document
 function assistantPanel() {
   return h("aside", { class: "assist-col", "aria-label": "Assistant" },
     h("div", { class: "panel-head" }, h("h2", {}, "Assistant"),
-      h("button", { class: "ghost small", id: "clearCards", onclick: () => { cards = []; renderCards(); } }, "Clear")),
+      h("button", { class: "ghost small", id: "clearCards", onclick: () => { cards = []; renderCards(); persistCards(); } }, "Clear")),
+    h("form", { class: "ask", onsubmit: (e) => { e.preventDefault(); runAsk(); } },
+      h("textarea", { id: "askBox", rows: "2", placeholder: "Ask about your draft… e.g. Does my intro earn the main claim?", "aria-label": "Ask the assistant about your draft",
+        onkeydown: (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); runAsk(); } } }),
+      h("button", { class: "ghost small" }, "Ask")),
     h("div", { id: "cards", class: "cards", "aria-live": "polite" }));
 }
 function assistIntro() {
@@ -616,8 +620,16 @@ function renderCards() {
   $("#clearCards").hidden = !cards.length;
   box.replaceChildren(...(cards.length ? cards.map(cardView) : [assistIntro()]));
 }
+function persistCards() {
+  if (!current) return;
+  // keep finished results with the post (minus live controllers), newest 20
+  current.post.cards = cards.filter((c) => !c.pending && !c.error && c.result != null).slice(0, 20)
+    .map(({ ctl, progress, ...rest }) => rest);
+  scheduleSave();
+}
 function addCard(card) {
   card.id = store.newId();
+  card.at = Date.now();
   cards.unshift(card);
   if (cards.length > 25) cards.length = 25;
   renderCards();
@@ -626,28 +638,39 @@ function addCard(card) {
 function updateCard(card, patch) {
   Object.assign(card, patch);
   renderCards();
+  if (!card.pending) persistCards();
 }
 function dropCard(card) {
   cards = cards.filter((c) => c !== card);
   renderCards();
+  persistCards();
 }
 function requireModel() {
   if (isReady()) return true;
   toast("Connect a model to use the assistant.", { action: { label: "Connect", run: openSettings } });
   return false;
 }
-const KIND_LABEL = { grammar: "Grammar", clarify: "Clarify", prompt: "Prompt me", review: "Review", outline: "Outline" };
+const KIND_LABEL = { grammar: "Grammar", clarify: "Clarify", prompt: "Prompt me", review: "Review", outline: "Outline", ask: "Ask" };
 
 function cardView(c) {
   const head = h("div", { class: "card-head" },
     h("span", { class: "card-kind" }, KIND_LABEL[c.kind]),
     c.scopeLabel ? h("span", { class: "card-scope" }, c.scopeLabel) : null,
+    c.at && Date.now() - c.at > 3600e3 ? h("span", { class: "card-scope" }, "· " + timeAgo(c.at)) : null,
     h("button", { class: "icon-btn small", "aria-label": "Dismiss", title: "Dismiss", onclick: () => { c.ctl?.abort(); dropCard(c); } }, "×"));
   const el = h("article", { class: "card " + c.kind + (c.done ? " done" : ""), "data-card": c.id }, head);
   if (c.original && c.kind !== "review") {
     el.append(h("button", { class: "quote", title: "Show in draft", onclick: () => { const r = locate(c); if (r) selectInDraft(r.start, r.end); else toast("That text has changed in your draft."); } }, clip(c.original, 160)));
   }
+  if (c.pending && c.kind === "ask" && c.partial) {
+    el.append(h("p", { class: "asked" }, c.question));
+    const ans = h("div", { class: "answer reading-sm" });
+    ans.innerHTML = renderMarkdown(c.partial);
+    el.append(ans, h("button", { class: "link-btn", onclick: () => c.ctl?.abort() }, "Stop"));
+    return el;
+  }
   if (c.pending) {
+    if (c.question) el.append(h("p", { class: "asked" }, c.question));
     el.append(h("div", { class: "thinking" }, h("span", { class: "spinner", "aria-hidden": "true" }), c.progress || "Thinking…",
       h("button", { class: "link-btn", onclick: () => c.ctl?.abort() }, "Stop")));
     return el;
@@ -691,7 +714,7 @@ function cardView(c) {
     el.append(h("p", { class: "hint" }, "Answer whichever sparks something, in your own words."));
     el.append(h("ul", { class: "qs" }, c.result.map((q, i) => h("li", { class: c.saved?.[i] ? "saved" : "" },
       h("span", {}, q),
-      c.saved?.[i] ? h("span", { class: "ok-text small-text" }, "In notes") : h("button", { class: "link-btn", onclick: () => { addNote(store.blankNote("question", { text: q })); (c.saved ||= {})[i] = true; renderCards(); } }, "Save to notes")))));
+      c.saved?.[i] ? h("span", { class: "ok-text small-text" }, "In notes") : h("button", { class: "link-btn", onclick: () => { addNote(store.blankNote("question", { text: q })); (c.saved ||= {})[i] = true; renderCards(); persistCards(); } }, "Save to notes")))));
     el.append(h("div", { class: "row end" }, h("button", { class: "ghost small", onclick: () => runPromptMe() }, "Different questions")));
   }
 
@@ -701,12 +724,20 @@ function cardView(c) {
       const found = current.post.body.indexOf(r.quote);
       return h("li", { class: c.checked?.[i] ? "checked" : "" },
         h("div", { class: "row between nowrap" }, h("span", { class: "chip kind-" + slugify(r.kind || "note") }, r.kind || "note"),
-          h("label", { class: "check small-text" }, h("input", { type: "checkbox", checked: !!c.checked?.[i], onchange: (e) => { (c.checked ||= {})[i] = e.target.checked; renderCards(); } }), "Done")),
+          h("label", { class: "check small-text" }, h("input", { type: "checkbox", checked: !!c.checked?.[i], onchange: (e) => { (c.checked ||= {})[i] = e.target.checked; renderCards(); persistCards(); } }), "Done")),
         h("button", { class: "quote", disabled: found < 0, title: found < 0 ? "Not found in the draft any more" : "Show in draft",
           onclick: () => { const j = current.post.body.indexOf(r.quote); if (j >= 0) selectInDraft(j, j + r.quote.length); } }, clip(r.quote, 120)),
         h("p", {}, r.note));
     })));
     el.append(h("div", { class: "row end" }, h("button", { class: "ghost small", onclick: () => runReview() }, "Review again")));
+  }
+
+  if (c.kind === "ask") {
+    el.append(h("p", { class: "asked" }, c.question));
+    const ans = h("div", { class: "answer reading-sm" });
+    ans.innerHTML = renderMarkdown(c.result || c.partial || "");
+    el.append(ans);
+    return el;
   }
 
   if (c.kind === "outline") {
@@ -838,6 +869,18 @@ function runReview() {
     const notes = await completeJSON({ ...P.reviewPrompt(current.post), signal, maxTokens: 2000 });
     return (Array.isArray(notes) ? notes : []).filter((n) => n && n.quote && n.note).map((n) => ({ quote: String(n.quote).trim(), kind: String(n.kind || "note"), note: String(n.note) }));
   });
+}
+function runAsk() {
+  const box = $("#askBox");
+  const q = box.value.trim();
+  if (!q) { box.focus(); return; }
+  if (!requireModel()) return;
+  box.value = "";
+  const history = cards.filter((c) => c.kind === "ask" && c.result).slice(0, 4).reverse().map((c) => ({ q: c.question, a: c.result }));
+  const card = { kind: "ask", question: q };
+  let last = 0;
+  runTool(card, async (signal) => (await complete({ ...P.askPrompt(current.post, q, history), signal, maxTokens: 900,
+    onText: (t) => { card.partial = t; if (Date.now() - last > 120) { last = Date.now(); renderCards(); } } })).trim());
 }
 function runOutline() {
   if (!requireModel()) return;
