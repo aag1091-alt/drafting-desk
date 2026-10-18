@@ -274,7 +274,7 @@ function renderEditor(post) {
         h("span", { id: "wordCount" }),
         h("label", { class: "goal", title: "Target length in words (optional)" }, "Goal",
           h("input", { type: "number", min: "0", step: "100", inputmode: "numeric", value: post.goal || "", placeholder: "—", "aria-label": "Word goal",
-            oninput: (e) => { post.goal = Math.max(0, Number(e.target.value) || 0); updateStats(); scheduleSave(); } })), h("span", { id: "authorship", title: "Share of the draft you typed yourself, versus text inserted by accepting suggestions (approximate)" }),
+            oninput: (e) => { post.goal = Math.max(0, Number(e.target.value) || 0); updateStats(); scheduleSave(); } })), h("span", { id: "authorship", title: "Roughly how much of the draft is your own wording. Accepted rewordings and outline headings count against it; grammar fixes don't." }),
         h("span", { id: "saveState", class: "save-state" }, "Saved"))),
     h("main", { class: "workspace" + (s.notesOpen ? "" : " notes-closed") + (document.body.classList.contains("focus") ? "" : ""), id: "workspace" },
       notesPanel(),
@@ -834,10 +834,18 @@ function cardView(c) {
   if (c.kind === "clarify") {
     el.append(h("p", { class: "issue" }, c.result.issue || ""));
     (c.result.options || []).forEach((o, i) => {
+      // Light edits read best as a diff; restructured sentences read best as clean text.
+      const showDiff = (c.diffOn ||= {})[i] ?? changeRatio(c.original, o.text) <= 0.3;
+      const body = showDiff
+        ? h("p", { class: "diff" }, wordDiff(c.original, o.text).map((p) => p.type === "same" ? p.text : p.type === "add" ? h("ins", {}, p.text) : h("del", {}, p.text)))
+        : h("p", { class: "diff" }, o.text);
       el.append(h("div", { class: "option" + (c.chosen === i ? " chosen" : "") },
-        h("p", { class: "diff" }, wordDiff(c.original, o.text).map((p) => p.type === "same" ? p.text : p.type === "add" ? h("ins", {}, p.text) : h("del", {}, p.text))),
+        h("span", { class: "option-num" }, `Option ${i + 1}`),
+        body,
         o.why ? h("p", { class: "hint" }, o.why) : null,
-        c.done ? null : h("button", { class: "ghost small", onclick: () => { c.chosen = i; acceptText(c, o.text); } }, "Use this")));
+        h("div", { class: "row" },
+          c.done ? null : h("button", { class: "ghost small", onclick: () => { c.chosen = i; acceptText(c, o.text); } }, "Use this"),
+          h("button", { class: "link-btn small-text", onclick: () => { c.diffOn[i] = !showDiff; renderCards(); } }, showDiff ? "hide changes" : "show changes"))));
     });
     if (c.result.question) el.append(h("p", { class: "question" }, h("strong", {}, "Question for you: "), c.result.question,
       h("button", { class: "link-btn", onclick: () => { addNote(store.blankNote("question", { text: c.result.question })); toast("Saved to notes"); } }, " Save to notes")));
@@ -890,10 +898,24 @@ function cardView(c) {
 function acceptText(card, text) {
   const r = locate(card);
   if (!r) { toast("That passage changed since you asked. Run the tool again.", { error: true }); return; }
+  const before = current.post.body;
+  // Spelling and grammar fixes are still the writer's words; only rewordings count.
+  const added = card.kind === "grammar" ? 0 : addedChars(card.original, text);
   replaceRange(r.start, r.end, text);
-  current.post.aiChars += addedChars(card.original, text);
+  current.post.aiChars += added;
   updateStats();
   updateCard(card, { done: true });
+  toast("Change applied", { action: { label: "Undo", run: () => {
+    const ta = draft();
+    ta.focus();
+    let ok = false;
+    try { ok = document.execCommand("undo"); } catch {}
+    if (!ok || ta.value !== before) { ta.value = before; }
+    current.post.body = ta.value;
+    current.post.aiChars = Math.max(0, current.post.aiChars - added);
+    autogrow(); updateStats(); updateHighlights(); scheduleSave();
+    updateCard(card, { done: false, chosen: undefined });
+  } } });
 }
 
 function announceIfHidden(card) {

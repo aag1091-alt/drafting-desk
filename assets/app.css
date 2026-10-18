@@ -237,7 +237,7 @@ dialog:has(.narrow) { width: min(420px, calc(100vw - 32px)); }
 #toast { position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); transform: translate(-50%, 20px); background: var(--fg); color: var(--bg); padding: 10px 16px; border-radius: 8px; opacity: 0; pointer-events: none; max-width: calc(100vw - 32px); font-size: 14px; }
 #toast.show { opacity: 1; transform: translate(-50%, 0); }
 #toast.err { background: var(--danger); color: #fff; }
-#toast { display: flex; gap: 14px; align-items: center; }
+#toast { display: flex; gap: 14px; align-items: center; z-index: 100; }
 #toast.show { pointer-events: auto; }
 .toast-btn { background: none; border: 0; color: inherit; font-weight: 700; text-decoration: underline; cursor: pointer; padding: 0; }
 @media (prefers-reduced-motion: no-preference) {
@@ -280,3 +280,5 @@ dialog:has(.narrow) { width: min(420px, calc(100vw - 32px)); }
 .pill.tag { color: var(--accent); }
 .post-filters { margin-top: 10px; }
 .post-filters .note-search { flex: 1 1 200px; padding: 6px 10px; }
+
+.option-num { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
