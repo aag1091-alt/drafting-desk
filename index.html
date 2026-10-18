@@ -36,7 +36,7 @@
   <form method="dialog" class="dlg wide">
     <header class="dlg-head"><h2 id="voiceTitle">Your voice</h2><button class="icon-btn" value="close" aria-label="Close">×</button></header>
     <p class="hint">Describe how you write, as a few bullet points. It's used when the assistant suggests clearer wordings, so the options sound like you. Or use "Learn from my writing" below.</p>
-    <textarea id="voiceText" rows="10" aria-label="Voice guide"></textarea>
+    <textarea id="voiceText" rows="10" autofocus aria-label="Voice guide"></textarea>
     <details id="learnBox">
       <summary>Learn from my writing</summary>
       <p class="hint">Paste two or three things you've written. The model drafts a guide from them; the samples aren't stored.</p>
@@ -54,7 +54,7 @@
 <dialog id="newDlg" aria-labelledby="newTitle">
   <form method="dialog" class="dlg" id="newForm">
     <header class="dlg-head"><h2 id="newTitle">New post</h2><button type="button" class="icon-btn" id="newClose" aria-label="Close">×</button></header>
-    <label class="field"><span>Working title</span><input id="newPostTitle" required placeholder="What I learned building…" autocomplete="off"></label>
+    <label class="field"><span>Working title</span><input id="newPostTitle" autofocus required placeholder="What I learned building…" autocomplete="off"></label>
     <label class="field"><span>The idea, in a sentence or two <em>(optional; saved as your first note)</em></span><textarea id="newPostIdea" rows="3" placeholder="What do you want readers to walk away with?"></textarea></label>
     <div class="row end"><button class="primary" id="newCreate">Create</button></div>
   </form>
@@ -62,19 +62,22 @@
 
 <!-- Export -->
 <dialog id="exportDlg" aria-labelledby="exportTitle">
-  <div class="dlg wide">
+  <div class="dlg wide dlg-scroll">
     <header class="dlg-head"><h2 id="exportTitle">Preview and export</h2><button class="icon-btn" id="exportClose" aria-label="Close">×</button></header>
-    <div class="export-meta">
-      <label class="field"><span>Description <em>(link previews and search; optional)</em></span>
-        <textarea id="exDesc" rows="2" placeholder="One sentence on what readers get from this post"></textarea>
-        <span class="row between"><span class="hint" id="exDescCount"></span><button type="button" class="ghost small" id="exDescSuggest">Suggest from my draft</button></span></label>
-      <label class="field"><span>Tags <em>(comma-separated; optional)</em></span><input id="exTags" placeholder="ai, networking, side projects" autocomplete="off"></label>
+    <div class="dlg-body">
+      <div class="export-meta">
+        <label class="field"><span>Description <em>(link previews and search; optional)</em></span>
+          <textarea id="exDesc" rows="2" autofocus placeholder="One sentence on what readers get from this post"></textarea>
+          <span class="row between"><span class="hint" id="exDescCount"></span><button type="button" class="ghost small" id="exDescSuggest">Suggest from my draft</button></span></label>
+        <label class="field"><span>Tags <em>(comma-separated; optional)</em></span><input id="exTags" placeholder="ai, networking, side projects" autocomplete="off"></label>
+      </div>
+      <section class="checks" id="exportChecks" aria-label="Before you publish"></section>
+      <article class="reading" id="exportBody"></article>
     </div>
-    <article class="reading" id="exportBody"></article>
-    <div class="row between">
+    <footer class="dlg-foot row between">
       <label class="check"><input type="checkbox" id="frontMatter" checked> Jekyll front matter</label>
-      <div class="row"><button class="ghost" id="copyMd">Copy Markdown</button><button class="primary" id="downloadMd">Download .md</button></div>
-    </div>
+      <div class="row"><button class="ghost" id="markPublished" hidden>Mark as Published</button><button class="ghost" id="copyMd">Copy Markdown</button><button class="primary" id="downloadMd">Download .md</button></div>
+    </footer>
   </div>
 </dialog>
 
@@ -82,7 +85,7 @@
 <dialog id="versionsDlg" aria-labelledby="versionsTitle">
   <div class="dlg wide">
     <header class="dlg-head"><h2 id="versionsTitle">Versions</h2><button class="icon-btn" id="versionsClose" aria-label="Close">×</button></header>
-    <div class="row nowrap"><input id="versionLabel" placeholder="Label for this version (optional)" aria-label="Version label"><button class="primary" id="saveVersion">Save current</button></div>
+    <div class="row nowrap"><input id="versionLabel" autofocus placeholder="Label for this version (optional)" aria-label="Version label"><button class="primary" id="saveVersion">Save current</button></div>
     <p class="hint">Versions are also saved automatically: the first time you change an existing draft each day, and before any restore.</p>
     <ul class="versions" id="versionList"></ul>
   </div>

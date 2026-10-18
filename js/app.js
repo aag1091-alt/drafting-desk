@@ -1,5 +1,5 @@
 import * as store from "./store.js?v=__V__";
-import { PROVIDERS, startOpenRouterLogin, finishOpenRouterLogin, isReady, listModels, complete, completeJSON } from "./providers.js?v=__V__";
+import { PROVIDERS, startOpenRouterLogin, finishOpenRouterLogin, isReady, listModels, complete, completeJSON, health } from "./providers.js?v=__V__";
 import * as P from "./prompts.js?v=__V__";
 import { renderMarkdown, postToMarkdown, slugify, wordCount } from "./markdown.js?v=__V__";
 import { wordDiff, addedChars, changeCount, paraDiff } from "./diff.js?v=__V__";
@@ -92,8 +92,9 @@ document.addEventListener("visibilitychange", () => { if (document.hidden) flush
 function modelButton() {
   const s = store.getSettings();
   const ready = isReady(s);
-  return h("button", { class: "ghost model-btn" + (ready ? "" : " needs"), onclick: openSettings, title: "Choose the model the assistant uses" },
-    h("span", { class: "dot " + (ready ? "ok" : "warn") }),
+  const ok = ready && health.ok;
+  return h("button", { class: "ghost model-btn" + (ready ? "" : " needs"), onclick: openSettings, title: ok ? "Choose the model the assistant uses" : ready ? `Last request failed: ${health.message}` : "Connect a model" },
+    h("span", { class: "dot " + (ok ? "ok" : "warn") }),
     h("span", { class: "model-label" }, ready ? `${PROVIDERS[s.provider].label} · ${s.models[s.provider]}` : "Connect a model"));
 }
 
@@ -398,6 +399,10 @@ function onDraftKey(e) {
     else ({ 1: runGrammar, 2: runClarify, 3: runPromptMe, 4: runReview })[k]();
   }
   if (mod && e.key.toLowerCase() === "s") { e.preventDefault(); flushSave(); setSaveState("Saved"); }
+  if (e.altKey && e.key === "Enter") {
+    const c = cards.find((x, i) => !x.pending && !x.error && !x.done && !isCollapsed(x, i) && ((x.kind === "grammar" && x.result !== x.original && x.original) || (x.kind === "clarify" && x.result?.options?.length)));
+    if (c) { e.preventDefault(); acceptText(c, c.kind === "grammar" ? c.result : c.result.options[0].text); if (c.kind === "clarify") c.chosen = 0; }
+  }
   if (mod && !e.altKey && !e.shiftKey && ["b", "i", "k"].includes(e.key.toLowerCase())) {
     e.preventDefault();
     const ta = e.target, s0 = ta.selectionStart, s1 = ta.selectionEnd, sel = ta.value.slice(s0, s1);
@@ -867,11 +872,18 @@ function cardView(c) {
   }
   if (c.pending) {
     if (c.question) el.append(h("p", { class: "asked" }, c.question));
-    el.append(h("div", { class: "thinking" }, h("span", { class: "spinner", "aria-hidden": "true" }), c.progress || "Thinking…",
+    el.append(h("div", { class: "thinking" }, h("span", { class: "spinner", "aria-hidden": "true" }), c.progress || "Thinking…", h("span", { class: "elapsed hint" }),
       h("button", { class: "link-btn", onclick: () => c.ctl?.abort() }, "Stop")));
     return el;
   }
-  if (c.error) { el.append(h("p", { class: "status err" }, c.error)); return el; }
+  if (c.error) {
+    el.append(h("p", { class: "status err" }, c.error));
+    if (c.errorDetail) el.append(h("details", { class: "err-detail" }, h("summary", {}, "Details"), h("code", {}, c.errorDetail)));
+    el.append(h("div", { class: "row" },
+      c.retry ? h("button", { class: "ghost small", onclick: () => c.retry() }, "Try again") : null,
+      h("button", { class: "ghost small", onclick: openSettings }, "Change model")));
+    return el;
+  }
 
   if (c.kind === "grammar" && c.scopeLabel === "whole draft") {
     el.append(h("p", { class: c.result ? "" : "ok-text" }, c.result ? `${c.result} paragraph${c.result === 1 ? "" : "s"} with fixes below. Accept the ones you want.` : "No grammar or spelling issues found in the draft."));
@@ -892,7 +904,7 @@ function cardView(c) {
         c.scopeLabel && !c.scopeLabel.startsWith("paragraph ") ? [" · ", h("button", { class: "link-btn", onclick: () => runGrammarAll() }, "check whole draft")] : null),
       c.done ? h("span", { class: "ok-text" }, "Accepted") : h("div", { class: "row" },
         h("button", { class: "ghost small", onclick: () => dropCard(c) }, "Dismiss"),
-        h("button", { class: "primary small", onclick: () => acceptText(c, c.result) }, "Accept"))));
+        h("button", { class: "primary small", title: "Accept (Alt+Enter from the draft)", onclick: () => acceptText(c, c.result) }, "Accept"))));
   }
 
   if (c.kind === "clarify") {
@@ -1006,10 +1018,21 @@ function announceIfHidden(card) {
     toast(`${KIND_LABEL[card.kind]} is ready`, { action: { label: "View", run: () => el.scrollIntoView({ behavior: "smooth", block: "start" }) } });
   }
 }
+function refreshModelButton() {
+  document.querySelectorAll(".model-btn").forEach((b) => b.replaceWith(modelButton()));
+}
 async function runTool(card, fn) {
   card.ctl = new AbortController();
   card.pending = true;
-  addCard(card);
+  card.started = Date.now();
+  card.retry = () => { const fresh = { ...card, id: undefined, error: undefined, result: undefined, ctl: undefined, done: false }; dropCard(card); runTool(fresh, fn); };
+  if (!card.id) addCard(card);
+  const tick = setInterval(() => {
+    if (!card.pending) return clearInterval(tick);
+    const sec = Math.round((Date.now() - card.started) / 1000);
+    const el = document.querySelector(`[data-card="${card.id}"] .elapsed`);
+    if (el) el.textContent = sec >= 20 ? `${sec}s · still working (local and larger models can be slow)` : `${sec}s`;
+  }, 1000);
   try {
     const result = await fn(card.ctl.signal);
     updateCard(card, { pending: false, result });
@@ -1018,7 +1041,10 @@ async function runTool(card, fn) {
     announceIfHidden(card);
   } catch (e) {
     if (e.cancelled) dropCard(card);
-    else updateCard(card, { pending: false, error: e.message });
+    else updateCard(card, { pending: false, error: e.message, errorDetail: e.detail || "" });
+  } finally {
+    clearInterval(tick);
+    refreshModelButton();
   }
 }
 
@@ -1231,8 +1257,36 @@ $("#learnBtn").addEventListener("click", async () => {
 });
 
 // ---------- export ----------
+function exportChecks() {
+  const p = current.post, body = p.body;
+  const out = [];
+  const words = wordCount(body);
+  if (words < 50) out.push(["warn", `The draft is short (${words} words).`]);
+  if (/Try the assistant on these two practice paragraphs/.test(body)) out.push(["warn", "The practice paragraphs from the example are still in the draft."]);
+  const empty = [...body.matchAll(/^(#{1,6})\s+(.+)\n+(?=#{1,6}\s|$(?![\s\S]))/gm)].map((m) => m[2]);
+  if (empty.length) out.push(["warn", `Empty section${empty.length > 1 ? "s" : ""}: ${empty.map((t) => `"${clip(t, 40)}"`).join(", ")}.`]);
+  const strays = p.notes.filter((n) => n.kind === "question" && n.text.length > 15 && body.includes(n.text));
+  if (strays.length) out.push(["warn", `A saved question is pasted into the draft as text: "${clip(strays[0].text, 60)}".`]);
+  if (/\b(TODO|TK|FIXME)\b/.test(body)) out.push(["warn", "The draft still has TODO/TK markers."]);
+  const openNotes = cards.filter((c) => c.kind === "review" && !c.pending).flatMap((c) => (c.result || []).filter((_, i) => !c.checked?.[i])).length;
+  if (openNotes) out.push(["info", `${openNotes} review note${openNotes === 1 ? "" : "s"} not ticked off yet.`]);
+  const checked = cards.some((c) => c.kind === "grammar" && c.scopeLabel === "whole draft" && !c.pending && !c.error);
+  return { out, checked };
+}
+function renderExportChecks() {
+  const { out, checked } = exportChecks();
+  const box = $("#exportChecks");
+  box.replaceChildren(
+    h("h3", {}, "Before you publish"),
+    out.length ? h("ul", {}, out.map(([k, t]) => h("li", { class: k }, t))) : h("p", { class: "ok-text" }, "Nothing obvious left to fix."),
+    h("div", { class: "row" },
+      checked ? h("span", { class: "ok-text small-text" }, "Whole draft grammar-checked ✓") : null,
+      isReady() ? h("button", { class: "ghost small", onclick: () => { $("#exportDlg").close(); runGrammarAll(); } }, checked ? "Check grammar again" : "Check grammar of the whole draft") : null));
+}
 function openExport() {
   flushSave();
+  renderExportChecks();
+  $("#markPublished").hidden = true;
   $("#exDesc").value = current.post.description || "";
   descCount();
   $("#exTags").value = current.post.tags || "";
@@ -1258,10 +1312,19 @@ $("#exDescSuggest").addEventListener("click", async () => {
   } catch (e) { box.value = before; toast(e.message, { error: true }); }
   finally { btn.disabled = false; btn.textContent = "Suggest from my draft"; }
 });
-$("#copyMd").addEventListener("click", () => copyText(postToMarkdown(current.post, { frontMatter: $("#frontMatter").checked })));
+$("#copyMd").addEventListener("click", () => { copyText(postToMarkdown(current.post, { frontMatter: $("#frontMatter").checked })); offerPublished(); });
+function offerPublished() { if (current.post.status !== "Published") $("#markPublished").hidden = false; }
+$("#markPublished").addEventListener("click", () => {
+  current.post.status = "Published";
+  const sel = $(".status-select"); if (sel) sel.value = "Published";
+  scheduleSave();
+  $("#markPublished").hidden = true;
+  toast("Marked as Published");
+});
 $("#downloadMd").addEventListener("click", () => {
   const p = current.post;
   downloadText(`${new Date().toISOString().slice(0, 10)}-${slugify(p.title)}.md`, postToMarkdown(p, { frontMatter: $("#frontMatter").checked }));
+  offerPublished();
 });
 
 // ---------- settings ----------

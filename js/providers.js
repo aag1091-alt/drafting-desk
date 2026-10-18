@@ -219,14 +219,22 @@ async function failure(res, label) {
   let detail = "";
   try {
     const t = await res.text();
-    const j = JSON.parse(t);
-    detail = j.error?.message || j.message || t.slice(0, 200);
+    try { const j = JSON.parse(t); detail = j.error?.message || j.message || t; } catch { detail = t; }
   } catch {}
-  const hint =
-    res.status === 401 || res.status === 403 ? " Check your key or sign in again in Settings."
-    : res.status === 429 ? " You're being rate limited; wait a minute and try again."
-    : "";
-  return new Error(`${label} returned ${res.status}${detail ? `: ${detail}` : "."}${hint}`);
+  detail = String(detail || "").slice(0, 300);
+  const s = res.status;
+  const msg =
+    s === 401 || s === 403 ? `${label} didn't accept your key or sign-in. Check it in the Model settings.`
+    : s === 402 || /credit|billing|balance/i.test(detail) ? `${label} says your account is out of credit. Add credit with the provider, or switch models.`
+    : s === 404 || /model.*not.*found|not_found/i.test(detail) ? `${label} doesn't recognise the model name. Pick one from List models.`
+    : s === 429 ? `${label} is rate limiting you. Wait a minute and try again.`
+    : s === 413 || /too long|context length|too many tokens/i.test(detail) ? "That's more text than this model can take at once. Try a smaller selection."
+    : s >= 500 ? `${label} had a problem on its side (error ${s}). Try again, or switch models.`
+    : `${label} couldn't handle that request (error ${s}).`;
+  const err = new Error(msg);
+  err.detail = detail;
+  err.status = s;
+  return err;
 }
 
 /**
@@ -234,6 +242,7 @@ async function failure(res, label) {
  * @param {{system?: string, prompt: string, onText?: (full: string) => void, signal?: AbortSignal, maxTokens?: number}} opts
  * @returns {Promise<string>} the full reply
  */
+export const health = { ok: true, message: "" };
 const noTemperature = new Set(); // models that refused a temperature setting this session
 
 export async function complete(opts) {
@@ -241,8 +250,11 @@ export async function complete(opts) {
   const modelKey = settings.provider + ":" + settings.models[settings.provider];
   const temp = noTemperature.has(modelKey) ? undefined : opts.temperature;
   try {
-    return await completeOnce({ ...opts, temperature: temp });
+    const r = await completeOnce({ ...opts, temperature: temp });
+    health.ok = true; health.message = "";
+    return r;
   } catch (e) {
+    if (!e.cancelled && !e.truncated) { health.ok = false; health.message = e.message; }
     // Some newer models reject sampling settings; retry once without.
     if (temp != null && /temperature/i.test(e.message) && !e.cancelled && !(e.partial || "").length) {
       noTemperature.add(modelKey);

@@ -346,3 +346,17 @@ body.focus .guide { display: none; }
 .guide-summary::-webkit-details-marker { display: none; }
 .guide[open] .guide-summary { display: none; }
 .guide:not([open]) { padding: 8px 14px; }
+
+/* dialogs with long content: body scrolls, footer stays put */
+.dlg-scroll { max-height: calc(100vh - 48px); overflow: hidden; }
+.dlg-scroll .dlg-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 14px; padding-right: 4px; }
+.dlg-scroll .reading { max-height: none; overflow: visible; }
+.dlg-foot { border-top: 1px solid var(--line); padding-top: 12px; flex-wrap: wrap; }
+.checks { border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; background: var(--sunk); font-size: 14px; display: flex; flex-direction: column; gap: 6px; }
+.checks h3 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.checks ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 3px; }
+.checks li.warn::marker { color: var(--warn); }
+.checks p { margin: 0; }
+.err-detail summary { font-size: 12px; color: var(--muted); cursor: pointer; }
+.err-detail code { display: block; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; margin-top: 4px; }
+.elapsed { margin-left: 4px; }
