@@ -666,6 +666,7 @@ function cardView(c) {
     }
     const parts = wordDiff(c.original, c.result);
     el.append(h("p", { class: "diff" }, parts.map((p) => p.type === "same" ? p.text : h(p.type === "add" ? "ins" : "del", {}, p.text))));
+    if (changeRatio(c.original, c.result) > 0.25) el.append(h("p", { class: "status err" }, "This changes more than grammar usually would. Check it's still what you meant before accepting."));
     el.append(h("div", { class: "row between" },
       h("span", { class: "hint" }, `${changeCount(parts)} change${changeCount(parts) === 1 ? "" : "s"}`),
       c.done ? h("span", { class: "ok-text" }, "Accepted") : h("div", { class: "row" },
@@ -760,11 +761,23 @@ function runGrammar() {
   if (sc.end <= sc.start) { toast("Put your cursor in a paragraph, or select some text."); return; }
   const original = body.slice(sc.start, sc.end);
   runTool({ kind: "grammar", start: sc.start, end: sc.end, original, scopeLabel: sc.label }, async (signal) => {
-    let out = await complete({ ...P.grammarPrompt(current.post, original), signal, maxTokens: Math.min(8000, 200 + original.length) });
-    out = out.replace(/^\s*<text>\s*|\s*<\/text>\s*$/g, "");
-    // keep the writer's surrounding whitespace exactly
-    return out.trim() === original.trim() ? original : out.trim();
+    const reply = await complete({ ...P.grammarPrompt(current.post, original), signal, temperature: 0, maxTokens: Math.min(8000, 300 + original.length) });
+    return parseCorrected(reply, original);
   });
+}
+/** Pull the corrected text out of a reply; tolerate models that think out loud first. */
+function parseCorrected(reply, original) {
+  const blocks = [...reply.matchAll(/<corrected>([\s\S]*?)<\/corrected>/g)];
+  let out = blocks.length ? blocks[blocks.length - 1][1] : reply.replace(/^\s*<text>\s*|\s*<\/text>\s*$/g, "");
+  out = out.replace(/^\n+|\n+$/g, "");
+  if (!out.trim()) return original;
+  return out.trim() === original.trim() ? original : out.trim();
+}
+/** Share of the original's words that a suggestion changes. */
+function changeRatio(a, b) {
+  const parts = wordDiff(a, b);
+  const changed = parts.filter((p) => p.type === "del").reduce((n, p) => n + wordCount(p.text), 0);
+  return changed / Math.max(1, wordCount(a));
 }
 function runGrammarAll() {
   if (!requireModel()) return;
@@ -782,9 +795,9 @@ function runGrammarAll() {
       if (signal.aborted) break;
       const p = paras[i];
       updateCard(holder, { progress: `Checking paragraph ${i + 1} of ${paras.length}…` });
-      let out = await complete({ ...P.grammarPrompt(current.post, p.text), signal, maxTokens: Math.min(4000, 200 + p.text.length) });
-      out = out.replace(/^\s*<text>\s*|\s*<\/text>\s*$/g, "").trim();
-      if (out && out !== p.text.trim()) {
+      const reply = await complete({ ...P.grammarPrompt(current.post, p.text), signal, temperature: 0, maxTokens: Math.min(4000, 300 + p.text.length) });
+      const out = parseCorrected(reply, p.text);
+      if (out !== p.text) {
         changed++;
         const card = { kind: "grammar", start: p.start, end: p.end, original: p.text, scopeLabel: `paragraph ${i + 1}`, result: out, id: store.newId() };
         cards.splice(cards.indexOf(holder) + 1, 0, card);

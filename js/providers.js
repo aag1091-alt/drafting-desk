@@ -224,7 +224,7 @@ async function failure(res, label) {
  * @param {{system?: string, prompt: string, onText?: (full: string) => void, signal?: AbortSignal, maxTokens?: number}} opts
  * @returns {Promise<string>} the full reply
  */
-export async function complete({ system, prompt, onText, signal, maxTokens = 2000 }) {
+export async function complete({ system, prompt, onText, signal, maxTokens = 2000, temperature }) {
   const settings = getSettings();
   const p = settings.provider;
   const model = settings.models[p];
@@ -250,6 +250,7 @@ export async function complete({ system, prompt, onText, signal, maxTokens = 200
           model,
           max_tokens: maxTokens,
           stream: true,
+          ...(temperature != null ? { temperature } : {}),
           ...(system ? { system } : {}),
           messages: [{ role: "user", content: prompt }],
         }),
@@ -272,6 +273,7 @@ export async function complete({ system, prompt, onText, signal, maxTokens = 200
       // OpenAI's newer models want max_completion_tokens; everyone else takes max_tokens.
       body: JSON.stringify({
         model, messages, stream: true,
+        ...(temperature != null && !(p === "openai" && /^o\d/.test(model)) ? { temperature } : {}),
         ...(p === "openai" ? { max_completion_tokens: maxTokens } : { max_tokens: maxTokens }),
       }),
     });

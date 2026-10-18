@@ -17,7 +17,7 @@ function notesText(post, max = 4000) {
 export function grammarPrompt(post, text) {
   return {
     system: `${HELPER}\n\nTask: correct spelling, grammar, punctuation and obvious typos ONLY. Make the smallest possible edits. Do not rephrase, reorder, shorten, lengthen, change word choice, change tone, or "improve" style. Keep Markdown, line breaks and links exactly. If nothing needs fixing, return the text unchanged.`,
-    prompt: `Correct this text. Reply with only the corrected text, nothing before or after it.\n\n<text>\n${text}\n</text>`,
+    prompt: `Correct this text with the smallest possible edits.\n\n<text>\n${text}\n</text>\n\nReply with the corrected text inside <corrected></corrected> tags and nothing else. Do not explain. Do not add quotation marks, colons or other punctuation for style; fix only what is wrong.`,
   };
 }
 
@@ -48,7 +48,7 @@ THEIR NOTES AND RESEARCH:
 ${notesText(post)}
 
 ${cursorContext ? `They are writing here (the text just before their cursor):\n<before>\n${cursorContext}\n</before>\n` : ""}
-They're stuck. Ask 4 short, specific questions that would help them figure out what to say next in their own words: their experience, a concrete example, why it matters, what a reader would push back on, what they actually decided. Don't ask about things the draft already covers. Reply with only a JSON array of strings.`,
+They're stuck. Ask 4 short, specific questions (one question each, under 20 words, no "and" chaining two questions) that would help them figure out what to say next in their own words: their experience, a concrete example, why it matters, what a reader would push back on, what they actually decided. Don't ask about things the draft already covers. Reply with only a JSON array of strings.`,
   };
 }
 
@@ -57,7 +57,7 @@ export function reviewPrompt(post) {
     system: `${HELPER}\n\nYou act like a sharp, kind editor giving margin notes. You point at problems; you do not rewrite. Quote the writer's text exactly when you refer to it.`,
     prompt: `${context(post, 20000)}
 
-Read the draft and give at most 8 margin notes, most important first. Each note points at one exact quote from the draft (copied character for character, short, from a single paragraph) and says in one or two sentences what's wrong and what kind of fix would help, without writing the fix. Look for: unclear sentences, claims that need a source or example, gaps in the argument, places a reader would get lost, repetition, a weak opening or ending, and a point the writer seems to be circling but hasn't said plainly. Skip grammar nits.
+Read the draft and give at most ${Math.max(2, Math.min(8, Math.round(post.body.split(/\s+/).length / 120)))} margin notes, most important first. The draft may be unfinished: don't flag topics the writer simply hasn't reached yet; review what is on the page. Each note points at one exact quote from the draft (copied character for character, short, from a single paragraph) and says in one or two sentences what's wrong and what kind of fix would help, without writing the fix. Look for: unclear sentences, claims that need a source or example, gaps in the argument, places a reader would get lost, repetition, a weak opening or ending, and a point the writer seems to be circling but hasn't said plainly. Skip grammar nits.
 
 Reply with only JSON: [{"quote": string, "kind": "unclear"|"needs support"|"gap"|"structure"|"repetition"|"opening"|"ending", "note": string}]`,
   };
