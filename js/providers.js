@@ -254,12 +254,16 @@ export async function complete(opts) {
     health.ok = true; health.message = "";
     return r;
   } catch (e) {
-    if (!e.cancelled && !e.truncated) { health.ok = false; health.message = e.message; }
     // Some newer models reject sampling settings; retry once without.
-    if (temp != null && /temperature/i.test(e.message) && !e.cancelled && !(e.partial || "").length) {
+    if (temp != null && /temperature/i.test(`${e.message} ${e.detail || ""}`) && !e.cancelled && !(e.partial || "").length) {
       noTemperature.add(modelKey);
-      return completeOnce({ ...opts, temperature: undefined });
+      try {
+        const r = await completeOnce({ ...opts, temperature: undefined });
+        health.ok = true; health.message = "";
+        return r;
+      } catch (e2) { e = e2; }
     }
+    if (!e.cancelled && !e.truncated) { health.ok = false; health.message = e.message; }
     throw e;
   }
 }
