@@ -268,7 +268,9 @@ function renderEditor(post) {
         h("button", { class: "ghost", onclick: openVoice, title: "Describe how you write, so suggestions sound like you" }, "Your voice"),
         h("button", { class: "ghost", onclick: openExport }, "Export"),
         modelButton())),
+    h("main", { class: "editor-main" },
     h("div", { class: "editor-head" },
+      h("h1", { class: "sr-only" }, "Editing: ", post.title || "Untitled post"),
       title,
       h("div", { class: "meta-row" }, status,
         h("span", { id: "wordCount" }),
@@ -276,7 +278,7 @@ function renderEditor(post) {
           h("input", { type: "number", min: "0", step: "100", inputmode: "numeric", value: post.goal || "", placeholder: "—", "aria-label": "Word goal",
             oninput: (e) => { post.goal = Math.max(0, Number(e.target.value) || 0); updateStats(); scheduleSave(); } })), h("span", { id: "authorship", title: "Roughly how much of the draft is your own wording. Accepted rewordings and outline headings count against it; grammar fixes don't." }),
         h("span", { id: "saveState", class: "save-state" }, "Saved"))),
-    h("main", { class: "workspace" + (s.notesOpen ? "" : " notes-closed") + (document.body.classList.contains("focus") ? "" : ""), id: "workspace" },
+    h("div", { class: "workspace" + (s.notesOpen ? "" : " notes-closed"), id: "workspace" },
       notesPanel(),
       h("section", { class: "draft-col", "aria-label": "Draft" },
         h("div", { class: "toolbar", role: "toolbar", "aria-label": "Assistant tools" },
@@ -293,7 +295,7 @@ function renderEditor(post) {
           h("span", { class: "scope", id: "scope" })),
         guideStrip(),
         h("div", { class: "draft-wrap" }, h("div", { class: "draft backdrop", id: "backdrop", "aria-hidden": "true" }), ta, selectionBar())),
-      assistantPanel()));
+      assistantPanel())));
   autogrow();
   updateStats();
   updateScope();
@@ -305,11 +307,11 @@ function renderEditor(post) {
 function guideStrip() {
   const s = store.getSettings();
   if (s.guideDone) return null;
-  const el = h("ol", { class: "guide", id: "guide" },
+  const el = h("div", { class: "guide", id: "guide", role: "note", "aria-label": "How this works" }, h("ol", {},
     h("li", {}, h("strong", {}, "Write"), " in your own words. Rough is fine; nothing is sent anywhere while you type."),
     h("li", {}, h("strong", {}, "Stuck?"), " Press ", h("em", {}, "I'm stuck"), " for questions that get you going."),
     h("li", {}, h("strong", {}, "Select a sentence"), " to fix its grammar or make it clearer. You approve every change."),
-    h("li", {}, h("strong", {}, "Finished a draft?"), " ", h("em", {}, "Review draft"), " gives you an editor's notes, highlighted in your text."),
+    h("li", {}, h("strong", {}, "Finished a draft?"), " ", h("em", {}, "Review draft"), " gives you an editor's notes, highlighted in your text.")),
     h("button", { class: "link-btn guide-close", onclick: () => { const st = store.getSettings(); st.guideDone = true; store.saveSettings(st); el.remove(); autogrow(); } }, "Got it"));
   return el;
 }
@@ -618,8 +620,8 @@ function notesPanel() {
         h("div", { class: "row between" },
           h("button", { class: "ghost small", id: "srcSummarize", onclick: summarizeSource, title: "Turn a pasted excerpt into short factual bullets" }, "Summarize excerpt"),
           h("button", { class: "primary small", onclick: addSource }, "Save source")))),
-    h("div", { class: "note-filters", role: "tablist" },
-      ["all", "note", "source", "question"].map((k) => h("button", { class: "filter" + (noteFilter === k ? " on" : ""), role: "tab", "aria-selected": String(noteFilter === k),
+    h("div", { class: "note-filters", role: "group", "aria-label": "Filter notes" },
+      ["all", "note", "source", "question"].map((k) => h("button", { class: "filter" + (noteFilter === k ? " on" : ""), "aria-pressed": String(noteFilter === k),
         onclick: () => { noteFilter = k; renderNotes(); } }, { all: "All", note: "Notes", source: "Sources", question: "Questions" }[k])),
       h("input", { class: "note-search", type: "search", placeholder: "Search", value: noteQuery, "aria-label": "Search notes", oninput: (e) => { noteQuery = e.target.value; renderNotes(); } })),
     h("ul", { class: "notes", id: "noteList" }, noteItems()));
@@ -646,7 +648,7 @@ function renderNotes() {
   document.querySelectorAll(".note-filters .filter").forEach((b, i) => {
     const k = ["all", "note", "source", "question"][i];
     b.classList.toggle("on", k === noteFilter);
-    b.setAttribute("aria-selected", String(k === noteFilter));
+    b.setAttribute("aria-pressed", String(k === noteFilter));
   });
 }
 function addNote(note) {
