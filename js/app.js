@@ -77,7 +77,10 @@ function route() {
   if (m) {
     const post = store.getPost(m[1]);
     if (!post) { location.hash = "#/"; return; }
-    if (current?.post.id !== post.id) cards = (post.cards || []).filter((c) => !c.pending && !c.error);
+    if (current?.post.id !== post.id) {
+      if (current) liveCards.set(current.post.id, cards);
+      cards = liveCards.get(post.id) || (post.cards || []).filter((c) => !c.pending && !c.error);
+    }
     renderEditor(post);
   } else {
     current = null;
@@ -100,6 +103,10 @@ function modelButton() {
 
 // ---------- home ----------
 let homeQuery = "", homeStatus = "All";
+function snippet(p) {
+  const t = p.body.replace(/^#.*$/gm, "").replace(/[*_`>#\[\]]/g, "").replace(/\(https?:[^)]+\)/g, "").replace(/\s+/g, " ").trim();
+  return t ? clip(t, 140) : (p.notes[0] ? clip("Note: " + p.notes[0].text, 140) : "");
+}
 function visiblePosts(posts) {
   const q = homeQuery.trim().toLowerCase();
   return posts.filter((p) => (homeStatus === "All" || p.status === homeStatus) && (!q || `${p.title} ${p.body}`.toLowerCase().includes(q)));
@@ -111,7 +118,7 @@ function renderHome() {
     h("header", { class: "topbar" },
       h("a", { class: "brand", href: "#/" }, h("span", { class: "brand-mark", "aria-hidden": "true" }), "Drafting Desk"),
       h("div", { class: "topbar-actions" }, modelButton())),
-    h("main", { class: "home" },
+    h("main", { class: "home" + (posts.length ? " returning" : "") },
       h("section", { class: "intro" },
         h("h1", {}, "Your words. Your post."),
         h("p", { class: "lede" }, "A desk for writing blog posts yourself. Keep notes and research beside the draft. When you want help, the assistant fixes grammar, shows you where a sentence is unclear, and asks the questions that get you unstuck. It doesn't write the post for you."),
@@ -140,6 +147,7 @@ function renderHome() {
         h("div", { class: "row between" },
           h("h2", {}, posts.length ? "Your posts" : "No posts yet"),
           h("div", { class: "row" },
+            posts.length ? h("button", { class: "primary small", onclick: openNewPost }, "New post") : null,
             h("button", { class: "ghost small", onclick: () => $("#importFile").click() }, "Import"),
             posts.length ? h("button", { class: "ghost small", onclick: exportBackup }, "Back up all") : null)),
         posts.length > 4 ? h("div", { class: "row post-filters" },
@@ -151,6 +159,7 @@ function renderHome() {
           ? h("ul", { class: "post-list" }, visiblePosts(posts).map((p) => h("li", {},
               h("a", { href: `#/p/${p.id}`, class: "post-link" },
                 h("span", { class: "post-title" }, p.title || "Untitled post"),
+                snippet(p) ? h("span", { class: "post-snippet" }, snippet(p)) : null,
                 h("span", { class: "post-meta" },
                   h("span", { class: "chip status-" + p.status.toLowerCase() }, p.status),
                   `${wordCount(p.body).toLocaleString()} words · ${p.notes.length} note${p.notes.length === 1 ? "" : "s"} · ${timeAgo(p.updated)}`)),
@@ -205,6 +214,7 @@ $("#newForm").addEventListener("submit", (e) => {
 // =====================================================================
 let saveTimer = null;
 let cards = [];          // assistant results for the open post (newest first)
+const liveCards = new Map(); // post id -> cards, so results still arriving survive navigation
 let noteFilter = "all";
 let noteQuery = "";
 let lastSel = { start: 0, end: 0 };
@@ -242,6 +252,7 @@ function notesOpen() {
 }
 let sessionNotesOpen = false;
 function renderEditor(post) {
+  if (current?.post.id !== post.id) lastSel = { start: post.body.length, end: post.body.length };
   current = { post, versionedToday: false };
   document.title = `${post.title} · Drafting Desk`;
   const s = { ...store.getSettings(), notesOpen: notesOpen() };
@@ -289,7 +300,7 @@ function renderEditor(post) {
         h("span", { id: "wordCount" }),
         h("label", { class: "goal", title: "Target length in words (optional)" }, "Goal",
           h("input", { type: "number", min: "0", step: "100", inputmode: "numeric", value: post.goal || "", placeholder: "—", "aria-label": "Word goal",
-            oninput: (e) => { post.goal = Math.max(0, Number(e.target.value) || 0); updateStats(); scheduleSave(); } })), h("span", { id: "authorship", title: "Roughly how much of the draft is your own wording. Accepted rewordings and outline headings count against it; grammar fixes don't." }),
+            oninput: (e) => { post.goal = Math.max(0, Number(e.target.value) || 0); updateStats(); scheduleSave(); } })), h("button", { id: "authorship", class: "link-btn plain", onclick: () => toast("Your words: roughly how much of the draft is your own wording. Accepted rewordings and outline headings lower it; grammar fixes don't.", { ms: 7000 }), title: "What does this mean?" }),
         h("button", { class: "ghost small", onclick: runTitles, title: "Title options built from phrases in your draft" }, "Title ideas"),
         h("span", { id: "saveState", class: "save-state" }, "Saved"))),
     h("div", { class: "workspace" + (s.notesOpen ? "" : " notes-closed"), id: "workspace" },
@@ -317,6 +328,7 @@ function renderEditor(post) {
   updateContents();
   renderCards();
   if (!post.body) ta.focus();
+  else { ta.setSelectionRange(lastSel.start, lastSel.end); }
 }
 
 function growTitle(el) {
@@ -572,7 +584,7 @@ function updateStats() {
   const chars = p.body.replace(/\s+/g, "").length;
   const mine = chars ? Math.max(0, Math.min(100, Math.round(100 * (1 - p.aiChars / chars)))) : 100;
   const a = $("#authorship");
-  if (a) { a.textContent = chars ? `${mine}% your words` : ""; a.className = mine < 80 ? "warn-text" : ""; }
+  if (a) { a.textContent = chars ? `${mine}% your words` : ""; a.className = "link-btn plain" + (mine < 80 ? " warn-text" : ""); }
 }
 
 // ---------- scope: what the assistant will act on ----------
@@ -684,10 +696,11 @@ function noteItems() {
   return list.slice().reverse().map((n) => h("li", { class: "note " + n.kind, "data-id": n.id },
     n.kind !== "note" ? h("span", { class: "chip" }, n.kind === "source" ? "Source" : "Question") : null,
     n.kind === "source" && (n.title || n.url) ? h("div", { class: "note-title" }, n.url ? h("a", { href: n.url, target: "_blank", rel: "noopener noreferrer" }, n.title || n.url) : n.title) : null,
-    h("div", { class: "note-text", contenteditable: "true", spellcheck: "true", "aria-label": "Edit note",
+    h("div", { class: "note-text", contenteditable: "true", spellcheck: "true", "aria-label": "Edit note", title: "Click to edit",
       onblur: (e) => { const t = e.target.innerText.trim(); if (t !== n.text) { n.text = t; scheduleSave(); } } }, n.text),
     h("div", { class: "note-actions" },
-      n.kind !== "source" ? h("button", { class: "link-btn", onmousedown: (e) => e.preventDefault(), onclick: () => insertAtCursor(n.text), title: "Insert this note's text at your cursor in the draft" }, "Insert") : null,
+      n.kind === "note" ? h("button", { class: "link-btn", onmousedown: (e) => e.preventDefault(), onclick: () => insertAtCursor(n.text), title: "Insert this note's text at your cursor in the draft" }, "Insert") : null,
+      n.kind === "question" ? h("button", { class: "link-btn", onmousedown: (e) => e.preventDefault(), onclick: () => answerQuestion(n.text), title: "Start a new paragraph in the draft to answer this" }, "Answer in draft") : null,
       n.kind === "source" && n.url ? h("button", { class: "link-btn", onmousedown: (e) => e.preventDefault(), onclick: () => insertLink(n), title: "Link the selected words to this source, or insert the source's title as a link" }, "Insert link") : null,
       h("span", { class: "note-date" }, timeAgo(n.created)),
       h("button", { class: "link-btn danger", onclick: () => { removeNote(n.id); } }, "Delete"))));
@@ -743,6 +756,28 @@ async function summarizeSource() {
     $("#srcText").value = out.trim();
   } catch (e) { $("#srcText").value = text; toast(e.message, { error: true }); }
   finally { btn.disabled = false; btn.textContent = "Summarize excerpt"; }
+}
+function answerQuestion(q) {
+  const ta = draft();
+  const text = ta.value;
+  // go to the end of the paragraph the cursor is in, then open a fresh one
+  let at = text.indexOf("\n\n", lastSel.end);
+  at = at < 0 ? text.length : at;
+  const before = text.slice(0, at).replace(/\s+$/, "");
+  const lead = before ? "\n\n" : "";
+  replaceRange(before.length, at, lead);
+  const pos = before.length + lead.length;
+  ta.setSelectionRange(pos, pos);
+  lastSel = { start: pos, end: pos };
+  showAnswering(q);
+}
+function showAnswering(q) {
+  $("#answering")?.remove();
+  const bar = h("div", { class: "answering", id: "answering", role: "status" },
+    h("span", {}, h("strong", {}, "Answering: "), q),
+    h("button", { class: "link-btn", onclick: () => bar.remove() }, "Done"));
+  $(".draft-wrap").before(bar);
+  draft().focus();
 }
 function insertLink(n) {
   const ta = draft();
@@ -805,15 +840,19 @@ function renderCards() {
   $("#clearCards").hidden = !cards.length;
   box.replaceChildren(...(cards.length ? cards.map((c, i) => (isCollapsed(c, i) ? cardSummary(c) : cardView(c))) : [assistIntro()]));
 }
-function persistCards() {
-  if (!current) return;
-  // keep finished results with the post (minus live controllers), newest 20
-  current.post.cards = cards.filter((c) => !c.pending && !c.error && c.result != null).slice(0, 20)
-    .map(({ ctl, progress, ...rest }) => rest);
-  scheduleSave();
+function persistCards(postId = current?.post.id) {
+  if (!postId) return;
+  const list = current && postId === current.post.id ? cards : liveCards.get(postId);
+  if (!list) return;
+  // keep finished results with their post (minus live controllers), newest 20
+  const saved = list.filter((c) => !c.pending && !c.error && c.result != null).slice(0, 20)
+    .map(({ ctl, progress, retry, ...rest }) => rest);
+  if (current && postId === current.post.id) { current.post.cards = saved; scheduleSave(); }
+  else { const p = store.getPost(postId); if (p) { p.cards = saved; store.savePost(p); } }
 }
 function addCard(card) {
   card.id = store.newId();
+  card.postId = current.post.id;
   card.at = Date.now();
   cards.unshift(card);
   if (cards.length > 25) cards.length = 25;
@@ -822,8 +861,10 @@ function addCard(card) {
 }
 function updateCard(card, patch) {
   Object.assign(card, patch);
-  renderCards();
-  if (!card.pending) persistCards();
+  const here = current && (!card.postId || card.postId === current.post.id);
+  if (here) renderCards();
+  else if (!card.pending && !card.error) toast(`${KIND_LABEL[card.kind]} is ready in "${clip(store.getPost(card.postId)?.title || "another post", 40)}"`, { action: { label: "Open", run: () => (location.hash = `#/p/${card.postId}`) } });
+  if (!card.pending) persistCards(card.postId || current?.post.id);
 }
 function dropCard(card) {
   cards = cards.filter((c) => c !== card);
@@ -932,7 +973,9 @@ function cardView(c) {
     el.append(h("p", { class: "hint" }, "Answer whichever sparks something, in your own words."));
     el.append(h("ul", { class: "qs" }, c.result.map((q, i) => h("li", { class: c.saved?.[i] ? "saved" : "" },
       h("span", {}, q),
-      c.saved?.[i] ? h("span", { class: "ok-text small-text" }, "In notes") : h("button", { class: "link-btn", onclick: () => { addNote(store.blankNote("question", { text: q })); (c.saved ||= {})[i] = true; renderCards(); persistCards(); } }, "Save to notes")))));
+      h("span", { class: "row" },
+        h("button", { class: "link-btn", onmousedown: (e) => e.preventDefault(), onclick: () => answerQuestion(q) }, "Answer in draft"),
+        c.saved?.[i] ? h("span", { class: "ok-text small-text" }, "In notes") : h("button", { class: "link-btn", onclick: () => { addNote(store.blankNote("question", { text: q })); (c.saved ||= {})[i] = true; renderCards(); persistCards(); } }, "Save to notes"))))));
     el.append(h("div", { class: "row end" }, h("button", { class: "ghost small", onclick: () => runPromptMe() }, "Different questions")));
   }
 
@@ -977,8 +1020,14 @@ function cardView(c) {
   if (c.kind === "outline") {
     el.append(h("ol", { class: "outline" }, c.result.map((o) => h("li", {}, h("strong", {}, o.heading), o.covers ? h("span", { class: "hint" }, " " + o.covers) : null))));
     el.append(h("div", { class: "row end" }, c.done ? h("span", { class: "ok-text" }, "Inserted") : h("button", { class: "ghost small", onclick: () => {
-      const text = c.result.map((o) => `## ${o.heading}\n\n`).join("");
-      insertAtCursor((current.post.body.trim() ? "\n\n" : "") + text);
+      const body = current.post.body;
+      let at = body.indexOf("\n\n", lastSel.end);
+      at = at < 0 ? body.length : at;
+      if (!body.trim()) at = 0;
+      const before = body.slice(0, at).replace(/\s+$/, "");
+      const after = body.slice(at).replace(/^\s+/, "");
+      const skel = c.result.map((o) => `## ${o.heading}`).join("\n\n");
+      replaceRange(0, body.length, (before ? before + "\n\n" : "") + skel + (after ? "\n\n" + after : "\n"));
       current.post.aiChars += addedChars("", c.result.map((o) => o.heading).join(" "));
       updateStats();
       updateCard(c, { done: true });
@@ -1076,7 +1125,8 @@ function changeRatio(a, b) {
 }
 function runGrammarAll() {
   if (!requireModel()) return;
-  const body = current.post.body;
+  const post = current.post;
+  const body = post.body;
   if (!body.trim()) { toast("Write something first."); return; }
   // paragraph ranges
   const paras = [];
@@ -1090,12 +1140,13 @@ function runGrammarAll() {
       if (signal.aborted) break;
       const p = paras[i];
       updateCard(holder, { progress: `Checking paragraph ${i + 1} of ${paras.length}…` });
-      const reply = await complete({ ...P.grammarPrompt(current.post, p.text), signal, temperature: 0, maxTokens: Math.min(4000, 300 + p.text.length) });
+      const reply = await complete({ ...P.grammarPrompt(post, p.text), signal, temperature: 0, maxTokens: Math.min(4000, 300 + p.text.length) });
       const out = parseCorrected(reply, p.text);
       if (out !== p.text) {
         changed++;
-        const card = { kind: "grammar", start: p.start, end: p.end, original: p.text, scopeLabel: `paragraph ${i + 1}`, result: out, id: store.newId(), at: Date.now(), batch: holder.id };
-        cards.splice(cards.indexOf(holder) + 1, 0, card);
+        const card = { kind: "grammar", start: p.start, end: p.end, original: p.text, scopeLabel: `paragraph ${i + 1}`, result: out, id: store.newId(), at: Date.now(), batch: holder.id, postId: holder.postId };
+        const list = current && holder.postId === current.post.id ? cards : liveCards.get(holder.postId);
+        if (list) list.splice(list.indexOf(holder) + 1, 0, card);
       }
     }
     return changed;
@@ -1309,6 +1360,7 @@ $("#exDescSuggest").addEventListener("click", async () => {
   try {
     const d = (await complete({ ...P.descriptionPrompt(current.post), maxTokens: 300, onText: (t) => (box.value = t) })).trim().replace(/^"|"$/g, "");
     box.value = d; current.post.description = d; descCount(); scheduleSave();
+    if (before.trim()) toast("Description replaced", { action: { label: "Undo", run: () => { box.value = before; current.post.description = before; descCount(); scheduleSave(); } } });
   } catch (e) { box.value = before; toast(e.message, { error: true }); }
   finally { btn.disabled = false; btn.textContent = "Suggest from my draft"; }
 });
