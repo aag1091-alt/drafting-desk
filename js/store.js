@@ -55,6 +55,8 @@ export function blankPost(title = "Untitled post") {
     notes: [],
     snapshots: [],
     aiChars: 0, // characters inserted by accepting AI suggestions (approximate)
+    description: "",
+    tags: "",
     created: now,
     updated: now,
   };
@@ -118,6 +120,8 @@ export function importPost(obj) {
     voice: typeof src.voice === "string" ? src.voice : DEFAULT_VOICE,
     body: String(src.body || ""),
     aiChars: Number(src.aiChars) || 0,
+    description: String(src.description || ""),
+    tags: String(src.tags || ""),
     notes: (Array.isArray(src.notes) ? src.notes : []).map((n) => ({
       ...blankNote(["note", "source", "question"].includes(n.kind) ? n.kind : "note"),
       text: String(n.text || ""), url: String(n.url || ""), title: String(n.title || ""),

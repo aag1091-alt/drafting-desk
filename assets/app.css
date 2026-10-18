@@ -304,3 +304,7 @@ select { border: 1px solid var(--line); border-radius: 6px; background: var(--pa
   .scope { display: none; }
   .draft { font-size: 18px; padding: 20px 18px; }
 }
+
+.export-meta { display: grid; gap: 10px; }
+.export-meta textarea { font: 14px/1.5 var(--sans); padding: 7px 10px; resize: vertical; }
+.export-meta input { width: 100%; border: 1px solid var(--line); border-radius: 6px; background: var(--sunk); padding: 7px 10px; min-width: 0; font-size: 14px; color: var(--fg); }

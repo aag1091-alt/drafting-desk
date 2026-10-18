@@ -279,6 +279,7 @@ function renderEditor(post) {
         h("label", { class: "goal", title: "Target length in words (optional)" }, "Goal",
           h("input", { type: "number", min: "0", step: "100", inputmode: "numeric", value: post.goal || "", placeholder: "—", "aria-label": "Word goal",
             oninput: (e) => { post.goal = Math.max(0, Number(e.target.value) || 0); updateStats(); scheduleSave(); } })), h("span", { id: "authorship", title: "Roughly how much of the draft is your own wording. Accepted rewordings and outline headings count against it; grammar fixes don't." }),
+        h("button", { class: "link-btn small-text", onclick: runTitles, title: "Title options built from phrases in your draft" }, "Title ideas"),
         h("span", { id: "saveState", class: "save-state" }, "Saved"))),
     h("div", { class: "workspace" + (s.notesOpen ? "" : " notes-closed"), id: "workspace" },
       notesPanel(),
@@ -794,7 +795,7 @@ function requireModel() {
   toast("Connect a model to use the assistant.", { action: { label: "Connect", run: openSettings } });
   return false;
 }
-const KIND_LABEL = { grammar: "Grammar", clarify: "Make it clearer", prompt: "I'm stuck", review: "Review", outline: "Outline", ask: "Ask" };
+const KIND_LABEL = { titles: "Title ideas",  grammar: "Grammar", clarify: "Make it clearer", prompt: "I'm stuck", review: "Review", outline: "Outline", ask: "Ask" };
 
 function cardView(c) {
   const head = h("div", { class: "card-head" },
@@ -883,6 +884,21 @@ function cardView(c) {
         h("p", {}, r.note));
     })));
     el.append(h("div", { class: "row end" }, h("button", { class: "ghost small", onclick: () => runReview() }, "Review again")));
+  }
+
+  if (c.kind === "titles") {
+    el.append(h("ul", { class: "qs" }, c.result.map((t) => h("li", {},
+      h("span", {}, t.title),
+      t.from ? h("span", { class: "hint" }, `from "${clip(t.from, 80)}"`) : null,
+      h("button", { class: "link-btn", onclick: () => {
+        const prev = current.post.title;
+        current.post.title = t.title;
+        const inp = $(".post-title-input"); inp.value = t.title; growTitle(inp);
+        document.title = `${t.title} · Drafting Desk`;
+        scheduleSave();
+        toast("Title updated", { action: { label: "Undo", run: () => { current.post.title = prev; inp.value = prev; growTitle(inp); scheduleSave(); } } });
+      } }, "Use this title")))));
+    return el;
   }
 
   if (c.kind === "ask") {
@@ -1049,6 +1065,16 @@ function runAsk() {
   runTool(card, async (signal) => (await complete({ ...P.askPrompt(current.post, q, history), signal, maxTokens: 900,
     onText: (t) => { card.partial = t; if (Date.now() - last > 120) { last = Date.now(); renderCards(); } } })).trim());
 }
+function runTitles() {
+  if (!requireModel()) return;
+  if (wordCount(current.post.body) < 80) { toast("Write a bit more first; titles are built from your own phrases."); return; }
+  runTool({ kind: "titles", scopeLabel: "from your draft" }, async (signal) => {
+    const r = await completeJSON({ ...P.titlePrompt(current.post), signal, maxTokens: 700 });
+    const list = (Array.isArray(r) ? r : []).filter((t) => t && t.title).map((t) => ({ title: String(t.title).trim(), from: String(t.from || "") })).slice(0, 6);
+    if (!list.length) throw new Error("No titles came back. Try again.");
+    return list;
+  });
+}
 function runOutline() {
   if (!requireModel()) return;
   if (!current.post.notes.length && wordCount(current.post.body) < 30) { toast("Add a few notes first; the outline is built from them."); return; }
@@ -1152,10 +1178,31 @@ $("#learnBtn").addEventListener("click", async () => {
 // ---------- export ----------
 function openExport() {
   flushSave();
+  $("#exDesc").value = current.post.description || "";
+  descCount();
+  $("#exTags").value = current.post.tags || "";
   $("#exportBody").innerHTML = renderMarkdown(`# ${current.post.title}\n\n${current.post.body}`);
   $("#exportDlg").showModal();
 }
 $("#exportClose").addEventListener("click", () => $("#exportDlg").close());
+function descCount() {
+  const n = $("#exDesc").value.trim().length;
+  const el = $("#exDescCount");
+  el.textContent = n ? `${n} characters${n < 70 ? " · a bit short" : n > 170 ? " · may be cut off in previews" : ""}` : "";
+}
+$("#exDesc").addEventListener("input", (e) => { current.post.description = e.target.value.replace(/\n/g, " "); descCount(); scheduleSave(); });
+$("#exTags").addEventListener("input", (e) => { current.post.tags = e.target.value; scheduleSave(); });
+$("#exDescSuggest").addEventListener("click", async () => {
+  if (!requireModel()) return;
+  if (wordCount(current.post.body) < 80) { toast("Write a bit more first."); return; }
+  const btn = $("#exDescSuggest"), box = $("#exDesc"), before = box.value;
+  btn.disabled = true; btn.textContent = "Thinking…";
+  try {
+    const d = (await complete({ ...P.descriptionPrompt(current.post), maxTokens: 300, onText: (t) => (box.value = t) })).trim().replace(/^"|"$/g, "");
+    box.value = d; current.post.description = d; descCount(); scheduleSave();
+  } catch (e) { box.value = before; toast(e.message, { error: true }); }
+  finally { btn.disabled = false; btn.textContent = "Suggest from my draft"; }
+});
 $("#copyMd").addEventListener("click", () => copyText(postToMarkdown(current.post, { frontMatter: $("#frontMatter").checked })));
 $("#downloadMd").addEventListener("click", () => {
   const p = current.post;

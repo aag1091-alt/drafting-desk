@@ -64,6 +64,12 @@
 <dialog id="exportDlg" aria-labelledby="exportTitle">
   <div class="dlg wide">
     <header class="dlg-head"><h2 id="exportTitle">Preview and export</h2><button class="icon-btn" id="exportClose" aria-label="Close">×</button></header>
+    <div class="export-meta">
+      <label class="field"><span>Description <em>(link previews and search; optional)</em></span>
+        <textarea id="exDesc" rows="2" placeholder="One sentence on what readers get from this post"></textarea>
+        <span class="row between"><span class="hint" id="exDescCount"></span><button type="button" class="ghost small" id="exDescSuggest">Suggest from my draft</button></span></label>
+      <label class="field"><span>Tags <em>(comma-separated; optional)</em></span><input id="exTags" placeholder="ai, networking, side projects" autocomplete="off"></label>
+    </div>
     <article class="reading" id="exportBody"></article>
     <div class="row between">
       <label class="check"><input type="checkbox" id="frontMatter" checked> Jekyll front matter</label>

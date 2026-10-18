@@ -52,9 +52,15 @@ export function renderMarkdown(md) {
 
 export function postToMarkdown(post, { frontMatter = true } = {}) {
   const date = new Date().toISOString().slice(0, 10);
+  const q = (v) => `"${String(v).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+  const tags = String(post.tags || "").split(",").map((t) => t.trim()).filter(Boolean);
   const head = frontMatter
-    ? `---\nlayout: post\ntitle: "${post.title.replace(/"/g, '\\"')}"\ndate: ${date}\n---\n\n`
-    : `# ${post.title}\n\n`;
+    ? "---\nlayout: post\n" +
+      `title: ${q(post.title)}\ndate: ${date}\n` +
+      (post.description ? `description: ${q(post.description)}\n` : "") +
+      (tags.length ? `tags: [${tags.map(q).join(", ")}]\n` : "") +
+      "---\n\n"
+    : `# ${post.title}\n\n${post.description ? `*${post.description}*\n\n` : ""}`;
   return (head + post.body.trim()).trimEnd() + "\n";
 }
 

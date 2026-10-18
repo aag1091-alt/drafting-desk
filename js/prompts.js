@@ -83,6 +83,20 @@ export function askPrompt(post, question, history = []) {
   };
 }
 
+export function titlePrompt(post) {
+  return {
+    system: `${HELPER}\n\nYou suggest titles built from the writer's own phrases and ideas. No clickbait, no colons-for-drama, no hype words.`,
+    prompt: `${context(post, 12000)}\n\nThe current working title is "${post.title}". Suggest 5 alternative titles. Prefer reusing a striking phrase the writer already wrote. Each under 70 characters. Reply with only a JSON array of {"title": string, "from": string} where "from" quotes the phrase from the draft it builds on (or "" if none).`,
+  };
+}
+
+export function descriptionPrompt(post) {
+  return {
+    system: `${HELPER}\n\nYou write the one-sentence description shown in link previews and search results, using the writer's own words wherever possible.`,
+    prompt: `${context(post, 12000)}\n\nWrite one plain sentence, 120 to 160 characters, saying what the reader gets from this post, using the writer's own phrasing where you can. No hype. Reply with only the sentence.`,
+  };
+}
+
 export function voicePrompt(samples) {
   return {
     system: "You are an editor who describes a writer's voice precisely enough that another writer could imitate it.",
