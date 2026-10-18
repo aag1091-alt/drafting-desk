@@ -52,12 +52,14 @@ export function renderMarkdown(md) {
 
 export function postToMarkdown(post, { frontMatter = true } = {}) {
   const date = new Date().toISOString().slice(0, 10);
-  let md = frontMatter ? `---\nlayout: post\ntitle: "${post.title.replace(/"/g, '\\"')}"\ndate: ${date}\n---\n\n` : `# ${post.title}\n\n`;
-  for (const s of post.sections) {
-    if (!s.prose.trim()) continue;
-    md += `## ${s.name}\n\n${s.prose.trim()}\n\n`;
-  }
-  return md.trimEnd() + "\n";
+  const head = frontMatter
+    ? `---\nlayout: post\ntitle: "${post.title.replace(/"/g, '\\"')}"\ndate: ${date}\n---\n\n`
+    : `# ${post.title}\n\n`;
+  return (head + post.body.trim()).trimEnd() + "\n";
+}
+
+export function wordCount(s) {
+  return (String(s).trim().match(/\S+/g) || []).length;
 }
 
 export function slugify(t) {

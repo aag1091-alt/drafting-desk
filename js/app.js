@@ -1,12 +1,15 @@
 import * as store from "./store.js";
 import { PROVIDERS, startOpenRouterLogin, finishOpenRouterLogin, isReady, listModels, complete, completeJSON } from "./providers.js";
-import { phrasePrompt, questionsPrompt, outlinePrompt, voicePrompt } from "./prompts.js";
-import { renderMarkdown, postToMarkdown, slugify } from "./markdown.js";
+import * as P from "./prompts.js";
+import { renderMarkdown, postToMarkdown, slugify, wordCount } from "./markdown.js";
+import { wordDiff, addedChars, changeCount } from "./diff.js";
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const app = $("#app");
+const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
+const MOD = isMac ? "⌘" : "Ctrl";
 
-// ---------- small helpers ----------
+// ---------- helpers ----------
 function h(tag, attrs = {}, ...kids) {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
@@ -14,18 +17,21 @@ function h(tag, attrs = {}, ...kids) {
     if (k === "class") el.className = v;
     else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
     else if (k === "text") el.textContent = v;
+    else if (k === "value") el.value = v;
     else el.setAttribute(k, v === true ? "" : v);
   }
   for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid instanceof Node ? kid : document.createTextNode(kid));
   return el;
 }
 let toastTimer;
-function toast(msg, isError = false) {
-  const t = $("#toast");
-  t.textContent = msg;
-  t.className = "show" + (isError ? " err" : "");
+function toast(msg, { error = false, action = null, ms } = {}) {
+  const t = $("#toast"), btn = $("#toastAction");
+  $("#toastText").textContent = msg;
+  t.className = "show" + (error ? " err" : "");
+  btn.hidden = !action;
+  if (action) { btn.textContent = action.label; btn.onclick = () => { action.run(); t.className = ""; }; }
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (t.className = ""), isError ? 6000 : 2500);
+  toastTimer = setTimeout(() => (t.className = ""), ms || (action ? 7000 : error ? 6000 : 2500));
 }
 function timeAgo(ms) {
   const s = (Date.now() - ms) / 1000;
@@ -33,6 +39,9 @@ function timeAgo(ms) {
   if (s < 3600) return `${Math.floor(s / 60)} min ago`;
   if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
   return new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+function stamp(ms) {
+  return new Date(ms).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 function confirmAction(text, yes = "Delete") {
   const d = $("#confirmDlg");
@@ -50,49 +59,41 @@ function downloadText(filename, text, type = "text/markdown") {
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
-async function copyText(text) {
-  try {
-    await navigator.clipboard.writeText(text);
-    toast("Copied");
-  } catch {
-    toast("Couldn't copy. Use Download instead.", true);
-  }
+async function copyText(text, what = "Copied") {
+  try { await navigator.clipboard.writeText(text); toast(what); }
+  catch { toast("Couldn't copy. Use Download instead.", { error: true }); }
 }
-function wordCount(s) {
-  return (s.trim().match(/\S+/g) || []).length;
-}
+const clip = (s, n = 140) => (s.length > n ? s.slice(0, n - 1).trimEnd() + "…" : s);
 
-// ---------- routing: #/ (home) and #/p/<id>[/<sectionId>] ----------
+// ---------- routing: #/ (home) and #/p/<id> ----------
+let current = null; // { post }
 function flushSave() {
   if (saveTimer && current) { clearTimeout(saveTimer); saveTimer = null; store.savePost(current.post); }
 }
 function route() {
   flushSave();
-  const m = location.hash.match(/^#\/p\/([0-9a-f]+)(?:\/([0-9a-f]+))?/);
+  const m = location.hash.match(/^#\/p\/([0-9a-f]+)/);
   if (m) {
     const post = store.getPost(m[1]);
     if (!post) { location.hash = "#/"; return; }
-    renderEditor(post, m[2]);
+    if (current?.post.id !== post.id) cards = [];
+    renderEditor(post);
   } else {
+    current = null;
     renderHome();
   }
 }
 window.addEventListener("hashchange", route);
+window.addEventListener("beforeunload", flushSave);
+document.addEventListener("visibilitychange", () => { if (document.hidden) flushSave(); });
 
 // ---------- top bar ----------
-function topBar(extra = []) {
+function modelButton() {
   const s = store.getSettings();
   const ready = isReady(s);
-  return h("header", { class: "topbar" },
-    h("a", { class: "brand", href: "#/" }, h("span", { class: "brand-mark", "aria-hidden": "true" }), "Drafting Desk"),
-    h("div", { class: "topbar-actions" },
-      ...extra,
-      h("button", { class: "ghost model-btn" + (ready ? "" : " needs"), onclick: openSettings, title: "Choose the model" },
-        h("span", { class: "dot " + (ready ? "ok" : "warn") }),
-        ready ? `${PROVIDERS[s.provider].label} · ${s.models[s.provider]}` : "Connect a model"
-      )
-    )
-  );
+  return h("button", { class: "ghost model-btn" + (ready ? "" : " needs"), onclick: openSettings, title: "Choose the model the assistant uses" },
+    h("span", { class: "dot " + (ready ? "ok" : "warn") }),
+    h("span", { class: "model-label" }, ready ? `${PROVIDERS[s.provider].label} · ${s.models[s.provider]}` : "Connect a model"));
 }
 
 // ---------- home ----------
@@ -100,52 +101,40 @@ function renderHome() {
   document.title = "Drafting Desk";
   const posts = store.listPosts();
   app.replaceChildren(
-    topBar(),
+    h("header", { class: "topbar" },
+      h("a", { class: "brand", href: "#/" }, h("span", { class: "brand-mark", "aria-hidden": "true" }), "Drafting Desk"),
+      h("div", { class: "topbar-actions" }, modelButton())),
     h("main", { class: "home" },
       h("section", { class: "intro" },
-        h("h1", {}, "Write it the way you'd say it."),
-        h("p", { class: "lede" }, "Answer a few questions in rough notes on the left. Get the section phrased in your own voice on the right. Edit both. Export Markdown for your blog."),
-        h("p", { class: "privacy" }, "Your posts never leave this browser. The only thing sent anywhere is the prompt, straight to the model provider you pick, with your own key or sign-in."),
+        h("h1", {}, "Your words. Your post."),
+        h("p", { class: "lede" }, "A desk for writing blog posts yourself. Keep notes and research beside the draft. When you want help, the assistant fixes grammar, shows you where a sentence is unclear, and asks the questions that get you unstuck. It doesn't write the post for you."),
+        h("p", { class: "privacy" }, "Everything stays in this browser. The assistant is optional; when you use it, only the text you ask about goes to the model provider you pick."),
         h("div", { class: "row" },
           h("button", { class: "primary", onclick: openNewPost }, "New post"),
-          h("button", { class: "ghost", onclick: loadSample }, "Open the example"),
-        )
-      ),
+          h("button", { class: "ghost", onclick: loadSample }, "Open the example"))),
       h("section", { class: "posts" },
         h("div", { class: "row between" },
           h("h2", {}, posts.length ? "Your posts" : "No posts yet"),
           h("div", { class: "row" },
             h("button", { class: "ghost small", onclick: () => $("#importFile").click() }, "Import"),
-            posts.length ? h("button", { class: "ghost small", onclick: exportBackup }, "Back up all") : null,
-          )
-        ),
+            posts.length ? h("button", { class: "ghost small", onclick: exportBackup }, "Back up all") : null)),
         posts.length
-          ? h("ul", { class: "post-list" }, posts.map((p) => {
-              const done = p.sections.filter((s) => s.prose.trim()).length;
-              const words = p.sections.reduce((n, s) => n + wordCount(s.prose), 0);
-              return h("li", {},
-                h("a", { href: `#/p/${p.id}`, class: "post-link" },
-                  h("span", { class: "post-title" }, p.title || "Untitled post"),
-                  h("span", { class: "post-meta" }, `${done} of ${p.sections.length} sections phrased · ${words.toLocaleString()} words · ${timeAgo(p.updated)}`)
-                ),
-                h("button", { class: "icon-btn", "aria-label": `Delete ${p.title}`, title: "Delete",
-                  onclick: async () => { if (await confirmAction(`Delete "${p.title}"? This can't be undone.`)) { store.deletePost(p.id); renderHome(); } } }, "×")
-              );
-            }))
-          : h("p", { class: "hint" }, "Start a new post, or open the example to see how it works.")
-      )
-    )
-  );
+          ? h("ul", { class: "post-list" }, posts.map((p) => h("li", {},
+              h("a", { href: `#/p/${p.id}`, class: "post-link" },
+                h("span", { class: "post-title" }, p.title || "Untitled post"),
+                h("span", { class: "post-meta" },
+                  h("span", { class: "chip status-" + p.status.toLowerCase() }, p.status),
+                  `${wordCount(p.body).toLocaleString()} words · ${p.notes.length} notes · ${timeAgo(p.updated)}`)),
+              h("button", { class: "icon-btn", "aria-label": `Delete ${p.title}`, title: "Delete",
+                onclick: async () => { if (await confirmAction(`Delete "${p.title}" and all its notes and versions? This can't be undone.`)) { store.deletePost(p.id); renderHome(); } } }, "×"))))
+          : h("p", { class: "hint" }, "Start a new post, or open the example to see how it works."))));
 }
-
 async function loadSample() {
   try {
     const res = await fetch("samples/model-prework.json");
     const post = store.importPost(await res.json());
     location.hash = `#/p/${post.id}`;
-  } catch (e) {
-    toast("Couldn't load the example.", true);
-  }
+  } catch { toast("Couldn't load the example.", { error: true }); }
 }
 function exportBackup() {
   downloadText(`drafting-desk-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(store.exportAll(), null, 2), "application/json");
@@ -160,263 +149,597 @@ $("#importFile").addEventListener("change", async (e) => {
     posts.forEach((p) => store.importPost(p));
     toast(`Imported ${posts.length} post${posts.length === 1 ? "" : "s"}`);
     route();
-  } catch (err) {
-    toast(err.message || "Couldn't read that file.", true);
-  }
+  } catch (err) { toast(err.message || "Couldn't read that file.", { error: true }); }
 });
 
 // ---------- new post ----------
 function openNewPost() {
-  const d = $("#newDlg");
   $("#newPostTitle").value = "";
   $("#newPostIdea").value = "";
-  $("#newStatus").textContent = "";
-  d.showModal();
+  $("#newDlg").showModal();
 }
-$("#newBlank").addEventListener("click", () => {
-  const title = $("#newPostTitle").value.trim() || "Untitled post";
+$("#newClose").addEventListener("click", () => $("#newDlg").close());
+$("#newForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const title = $("#newPostTitle").value.trim();
+  if (!title) return;
   const post = store.blankPost(title);
-  post.sections[0].questions = [
-    "What's this post about, in one sentence you'd say out loud?",
-    "Who is it for, and what should they be able to do after reading?",
-    "What happened that made you want to write it?",
-  ];
+  const idea = $("#newPostIdea").value.trim();
+  if (idea) post.notes.push(store.blankNote("note", { text: idea }));
   store.savePost(post);
   $("#newDlg").close();
   location.hash = `#/p/${post.id}`;
 });
-$("#newSuggest").addEventListener("click", async () => {
-  const title = $("#newPostTitle").value.trim();
-  if (!title) { $("#newPostTitle").focus(); return; }
-  if (!isReady()) { $("#newDlg").close(); openSettings(); toast("Connect a model first."); return; }
-  const btn = $("#newSuggest");
-  btn.disabled = true;
-  $("#newStatus").textContent = "Thinking…";
-  try {
-    const plan = await completeJSON({ ...outlinePrompt(title, $("#newPostIdea").value.trim()), maxTokens: 1500 });
-    const post = store.blankPost(title);
-    post.sections = (Array.isArray(plan) ? plan : []).filter((s) => s && s.name).map((s) => ({
-      ...store.blankSection(String(s.name)),
-      questions: Array.isArray(s.questions) ? s.questions.map(String) : [],
-    }));
-    if (!post.sections.length) throw new Error("No sections came back. Try again or start blank.");
-    store.savePost(post);
-    $("#newDlg").close();
-    location.hash = `#/p/${post.id}`;
-  } catch (e) {
-    $("#newStatus").textContent = e.message;
-  } finally {
-    btn.disabled = false;
-  }
-});
 
-// ---------- editor ----------
-let current = null; // { post, sectionId }
+// =====================================================================
+// Editor
+// =====================================================================
 let saveTimer = null;
-let inflight = null; // AbortController
+let cards = [];          // assistant results for the open post (newest first)
+let noteFilter = "all";
+let noteQuery = "";
+let lastSel = { start: 0, end: 0 };
+
+const draft = () => $("#draft");
 
 function scheduleSave() {
   clearTimeout(saveTimer);
-  const st = $("#saveState");
-  if (st) st.textContent = "Saving…";
+  setSaveState("Saving…");
   saveTimer = setTimeout(() => {
-    const ok = store.savePost(current.post);
-    const s = $("#saveState");
-    if (s) s.textContent = ok ? "Saved in this browser" : "Couldn't save (browser storage full?)";
-  }, 500);
+    saveTimer = null;
+    setSaveState(store.savePost(current.post) ? "Saved" : "Couldn't save: browser storage is full");
+  }, 400);
 }
-function curSection() {
-  return current.post.sections.find((s) => s.id === current.sectionId) || current.post.sections[0];
-}
+function setSaveState(t) { const s = $("#saveState"); if (s) s.textContent = t; }
 
-function renderEditor(post, sectionId) {
-  if (!post.sections.length) post.sections.push(store.blankSection("Introduction"));
-  current = { post, sectionId: post.sections.some((s) => s.id === sectionId) ? sectionId : post.sections[0].id };
-  document.title = `${post.title} · Drafting Desk`;
-  const sec = curSection();
-
-  const tabs = h("nav", { class: "tabs", role: "tablist", "aria-label": "Sections" },
-    post.sections.map((s, i) => {
-      const state = s.prose.trim() ? "done" : s.notes.trim() ? "notes" : "";
-      return h("a", {
-        class: "tab", role: "tab", href: `#/p/${post.id}/${s.id}`,
-        "aria-selected": String(s.id === sec.id), "aria-current": s.id === sec.id ? "true" : null,
-      }, h("span", { class: "dot " + state, title: state === "done" ? "Phrased" : state === "notes" ? "Has notes" : "Empty" }), h("span", { class: "tab-num" }, String(i + 1)), s.name);
-    }),
-    h("button", { class: "tab add", onclick: addSection, title: "Add a section" }, "+ Section")
-  );
-
-  const notes = h("textarea", { id: "notes", class: "notes", "aria-label": "Your notes", placeholder: "Type what you'd actually say. Fragments are fine.", oninput: (e) => { sec.notes = e.target.value; scheduleSave(); updateCounts(); } });
-  notes.value = sec.notes;
-  const facts = h("textarea", { id: "facts", class: "facts", rows: "6", "aria-label": "Reference facts", placeholder: "Numbers, links, quotes you want available. The model only uses what your notes point at.", oninput: (e) => { sec.facts = e.target.value; scheduleSave(); } });
-  facts.value = sec.facts;
-  const prose = h("textarea", { id: "prose", class: "prose", "aria-label": "Phrased text", placeholder: "Your notes, phrased the way you'd write them. Edit anything; your edits are kept.", oninput: (e) => { sec.prose = e.target.value; scheduleSave(); updateCounts(); } });
-  prose.value = sec.prose;
-
-  const qList = h("ol", { class: "questions" }, sec.questions.map((q) =>
-    h("li", {}, h("button", { class: "q", title: "Add to notes", onclick: () => {
-      notes.value = (notes.value.trim() ? notes.value.replace(/\s*$/, "\n\n") : "") + `Q: ${q}\nA: `;
-      sec.notes = notes.value; scheduleSave(); notes.focus(); notes.selectionStart = notes.selectionEnd = notes.value.length;
-    } }, q))
-  ));
-
-  const lenSel = h("select", { id: "len", "aria-label": "Target length", onchange: (e) => { post.length = Number(e.target.value); scheduleSave(); } },
-    [[150, "Short · ~150 words"], [280, "Medium · ~280 words"], [420, "Long · ~420 words"], [650, "Very long · ~650 words"]].map(([v, l]) => h("option", { value: v, selected: Number(post.length) === v }, l))
-  );
-
-  const sectionName = h("input", { class: "section-name", value: sec.name, "aria-label": "Section name",
-    oninput: (e) => { sec.name = e.target.value; scheduleSave(); },
-    onchange: () => renderEditor(post, sec.id) });
-  sectionName.value = sec.name;
-
-  const titleInput = h("input", { class: "post-title-input", "aria-label": "Post title", oninput: (e) => { post.title = e.target.value; document.title = `${post.title} · Drafting Desk`; scheduleSave(); } });
-  titleInput.value = post.title;
-
-  app.replaceChildren(
-    topBar([
-      h("button", { class: "ghost", onclick: openVoice }, "Voice"),
-      h("button", { class: "ghost", onclick: openPreview }, "Preview & export"),
-    ]),
-    h("main", { class: "editor" },
-      h("div", { class: "editor-head" }, titleInput),
-      tabs,
-      h("div", { class: "section-bar" },
-        sectionName,
-        h("div", { class: "row" },
-          h("button", { class: "ghost small", title: "Move left", "aria-label": "Move section left", onclick: () => moveSection(-1) }, "←"),
-          h("button", { class: "ghost small", title: "Move right", "aria-label": "Move section right", onclick: () => moveSection(1) }, "→"),
-          h("button", { class: "ghost small danger", onclick: deleteSection }, "Delete section"),
-        )
-      ),
-      h("div", { class: "panes" },
-        h("section", { class: "pane", "aria-labelledby": "leftH" },
-          h("div", { class: "pane-head" }, h("h2", { id: "leftH" }, "In your words"), h("button", { class: "ghost small", id: "askBtn", onclick: askMore }, "Ask me more")),
-          sec.questions.length ? h("p", { class: "hint" }, "Click a question to drop it into your notes. Answer roughly.") : h("p", { class: "hint" }, "No questions yet. Click “Ask me more”, or just start typing."),
-          qList,
-          notes,
-          h("div", { class: "counts", id: "notesCount" }),
-          h("details", { class: "facts-box" }, h("summary", {}, "Reference facts for this section"), facts),
-        ),
-        h("section", { class: "pane", "aria-labelledby": "rightH" },
-          h("div", { class: "pane-head" }, h("h2", { id: "rightH" }, "Phrased"),
-            h("div", { class: "row" }, lenSel,
-              h("button", { class: "primary", id: "phraseBtn", onclick: () => phrase() }, "Phrase it"),
-              h("button", { class: "ghost", id: "stopBtn", hidden: true, onclick: () => inflight?.abort() }, "Stop"),
-            )
-          ),
-          prose,
-          h("div", { class: "row between" },
-            h("span", { class: "status", id: "status" }),
-            h("div", { class: "row" },
-              h("button", { class: "ghost small", id: "restoreBtn", hidden: !sec.previous, onclick: restorePrevious }, "Restore previous version"),
-              h("span", { class: "counts", id: "proseCount" }))),
-        )
-      ),
-      h("footer", { class: "editor-foot" }, h("span", { id: "saveState" }, "Saved in this browser"), h("a", { href: "#/", class: "muted-link" }, "All posts"))
-    )
-  );
-  updateCounts();
-}
-function updateCounts() {
-  const s = curSection();
-  const n = $("#notesCount"), p = $("#proseCount");
-  if (n) n.textContent = `${wordCount(s.notes)} words of notes`;
-  if (p) p.textContent = s.prose.trim() ? `${wordCount(s.prose)} words` : "";
-}
-function setStatus(msg, err = false) {
-  const el = $("#status");
-  if (!el) return;
-  el.textContent = msg || "";
-  el.classList.toggle("err", err);
-}
-
-function addSection() {
-  const s = store.blankSection(`Section ${current.post.sections.length + 1}`);
-  current.post.sections.push(s);
-  store.savePost(current.post);
-  location.hash = `#/p/${current.post.id}/${s.id}`;
-}
-async function deleteSection() {
-  const s = curSection();
-  if (current.post.sections.length === 1) { toast("A post needs at least one section."); return; }
-  if (!(await confirmAction(`Delete the section "${s.name}" and its notes?`))) return;
-  const i = current.post.sections.indexOf(s);
-  current.post.sections.splice(i, 1);
-  store.savePost(current.post);
-  location.hash = `#/p/${current.post.id}/${current.post.sections[Math.max(0, i - 1)].id}`;
-}
-function moveSection(dir) {
-  const arr = current.post.sections;
-  const i = arr.indexOf(curSection());
-  const j = i + dir;
-  if (j < 0 || j >= arr.length) return;
-  [arr[i], arr[j]] = [arr[j], arr[i]];
-  store.savePost(current.post);
-  renderEditor(current.post, current.sectionId);
-}
-
-async function phrase() {
-  const post = current.post, sec = curSection();
-  if (!sec.notes.trim()) { setStatus("Add some notes on the left first.", true); $("#notes").focus(); return; }
-  if (!isReady()) { openSettings(); return; }
-  const out = $("#prose"), btn = $("#phraseBtn"), stop = $("#stopBtn");
-  const before = sec.prose;
-  inflight = new AbortController();
-  btn.disabled = true; stop.hidden = false;
-  setStatus("Thinking…");
-  try {
-    const text = await complete({ ...phrasePrompt(post, sec), signal: inflight.signal, onText: (t) => { out.value = t; setStatus("Writing…"); } });
-    sec.prose = text.trim();
-    out.value = sec.prose;
-    if (before.trim()) { sec.previous = before; $("#restoreBtn").hidden = false; }
-    setStatus("Done. Edit anything above.");
-  } catch (e) {
-    if (e.cancelled) { setStatus("Stopped."); sec.prose = e.partial || before; }
-    else { setStatus(e.message, true); sec.prose = before; }
-    out.value = sec.prose;
-  } finally {
-    btn.disabled = false; stop.hidden = true; inflight = null;
-    store.savePost(post); updateCounts();
-    renderTabsState();
+function autoVersion() {
+  const p = current.post;
+  const today = new Date().toDateString();
+  const last = p.snapshots[p.snapshots.length - 1];
+  if (p.body.trim() && (!last || new Date(last.at).toDateString() !== today)) {
+    addSnapshot(`Start of ${new Date().toLocaleDateString(undefined, { month: "short", day: "numeric" })}`);
   }
 }
-function restorePrevious() {
-  const sec = curSection();
-  if (!sec.previous) return;
-  [sec.prose, sec.previous] = [sec.previous, sec.prose];
-  $("#prose").value = sec.prose;
-  $("#restoreBtn").textContent = "Swap back";
-  store.savePost(current.post);
-  updateCounts();
+function addSnapshot(label) {
+  const p = current.post;
+  p.snapshots.push({ id: store.newId(), at: Date.now(), label: label || "", body: p.body });
+  if (p.snapshots.length > 40) p.snapshots.splice(0, p.snapshots.length - 40);
 }
-function renderTabsState() {
-  current.post.sections.forEach((s) => {
-    const tab = document.querySelector(`.tab[href$="/${s.id}"] .dot`);
-    if (tab) tab.className = "dot " + (s.prose.trim() ? "done" : s.notes.trim() ? "notes" : "");
+
+function renderEditor(post) {
+  current = { post, versionedToday: false };
+  document.title = `${post.title} · Drafting Desk`;
+  const s = store.getSettings();
+
+  const title = h("input", { class: "post-title-input", "aria-label": "Post title", value: post.title,
+    oninput: (e) => { post.title = e.target.value; document.title = `${post.title} · Drafting Desk`; scheduleSave(); } });
+
+  const status = h("select", { class: "status-select", "aria-label": "Status", onchange: (e) => { post.status = e.target.value; scheduleSave(); } },
+    store.STATUSES.map((st) => h("option", { value: st, selected: post.status === st }, st)));
+
+  const ta = h("textarea", { id: "draft", class: "draft", spellcheck: "true", "aria-label": "Draft",
+    placeholder: "Start writing. Use # for headings if you like. Everything you type here is yours; the assistant only suggests.",
+    oninput: onDraftInput, onkeydown: onDraftKey, onselect: rememberSel, onkeyup: rememberSel, onmouseup: rememberSel, onfocus: rememberSel });
+  ta.value = post.body;
+
+  const tool = (label, kbd, fn, title) => h("button", { class: "tool", title: `${title} (${MOD}+Alt+${kbd})`, onmousedown: (e) => e.preventDefault(), onclick: fn },
+    label, h("kbd", {}, kbd));
+
+  app.replaceChildren(
+    h("header", { class: "topbar" },
+      h("a", { class: "brand", href: "#/", title: "All posts" }, h("span", { class: "brand-mark", "aria-hidden": "true" }), h("span", { class: "brand-text" }, "Drafting Desk")),
+      h("div", { class: "topbar-actions" },
+        h("button", { class: "ghost", id: "focusBtn", onclick: toggleFocus, title: "Hide side panels" }, "Focus"),
+        h("button", { class: "ghost", onclick: openVersions }, "Versions"),
+        h("button", { class: "ghost", onclick: openVoice }, "Voice"),
+        h("button", { class: "ghost", onclick: openExport }, "Export"),
+        modelButton())),
+    h("div", { class: "editor-head" },
+      title,
+      h("div", { class: "meta-row" }, status,
+        h("span", { id: "wordCount" }), h("span", { id: "authorship", title: "Share of the draft you typed yourself, versus text inserted by accepting suggestions (approximate)" }),
+        h("span", { id: "saveState", class: "save-state" }, "Saved"))),
+    h("main", { class: "workspace" + (s.notesOpen ? "" : " notes-closed") + (document.body.classList.contains("focus") ? "" : ""), id: "workspace" },
+      notesPanel(),
+      h("section", { class: "draft-col", "aria-label": "Draft" },
+        h("div", { class: "toolbar", role: "toolbar", "aria-label": "Assistant tools" },
+          h("button", { class: "ghost small notes-toggle", onclick: toggleNotes, "aria-expanded": String(!!s.notesOpen) }, s.notesOpen ? "Hide notes" : "Notes"),
+          h("div", { class: "tools" },
+            tool("Fix grammar", "1", () => runGrammar(), "Correct spelling and grammar in the selection or this paragraph"),
+            tool("Clarify", "2", () => runClarify(), "Show what's unclear in the selection or this sentence, with options"),
+            tool("Prompt me", "3", () => runPromptMe(), "Questions to help you think of what to say next"),
+            tool("Review", "4", () => runReview(), "Editor's margin notes on the whole draft")),
+          h("span", { class: "scope", id: "scope" })),
+        ta),
+      assistantPanel()));
+  autogrow();
+  updateStats();
+  updateScope();
+  renderCards();
+  if (!post.body) ta.focus();
+}
+
+function onDraftInput(e) {
+  const p = current.post;
+  if (!current.versionedToday) { autoVersion(); current.versionedToday = true; }
+  p.body = e.target.value;
+  if (p.status === "Idea" && wordCount(p.body) > 30) { p.status = "Drafting"; const sel = $(".status-select"); if (sel) sel.value = "Drafting"; }
+  autogrow();
+  updateStats();
+  scheduleSave();
+}
+function onDraftKey(e) {
+  const mod = isMac ? e.metaKey : e.ctrlKey;
+  if (mod && e.altKey && ["1", "2", "3", "4"].includes(e.code.replace("Digit", ""))) {
+    e.preventDefault();
+    ({ 1: runGrammar, 2: runClarify, 3: runPromptMe, 4: runReview })[e.code.replace("Digit", "")]();
+  }
+  if (mod && e.key.toLowerCase() === "s") { e.preventDefault(); flushSave(); setSaveState("Saved"); }
+}
+function rememberSel() {
+  const ta = draft();
+  if (!ta) return;
+  lastSel = { start: ta.selectionStart, end: ta.selectionEnd };
+  updateScope();
+}
+function autogrow() {
+  const ta = draft();
+  if (!ta) return;
+  const y = window.scrollY;
+  ta.style.height = "auto";
+  ta.style.height = Math.max(ta.scrollHeight + 4, window.innerHeight * 0.6) + "px";
+  window.scrollTo(0, y);
+}
+window.addEventListener("resize", autogrow);
+
+function updateStats() {
+  const p = current.post;
+  const words = wordCount(p.body);
+  const wc = $("#wordCount");
+  if (wc) wc.textContent = `${words.toLocaleString()} words · ${Math.max(1, Math.round(words / 230))} min read`;
+  const chars = p.body.replace(/\s+/g, "").length;
+  const mine = chars ? Math.max(0, Math.min(100, Math.round(100 * (1 - p.aiChars / chars)))) : 100;
+  const a = $("#authorship");
+  if (a) { a.textContent = chars ? `${mine}% your words` : ""; a.className = mine < 80 ? "warn-text" : ""; }
+}
+
+// ---------- scope: what the assistant will act on ----------
+function paragraphAt(text, pos) {
+  let start = text.lastIndexOf("\n\n", Math.max(0, pos - 1));
+  start = start < 0 ? 0 : start + 2;
+  let end = text.indexOf("\n\n", pos);
+  end = end < 0 ? text.length : end;
+  while (start < end && /\s/.test(text[start])) start++;
+  while (end > start && /\s/.test(text[end - 1])) end--;
+  return { start, end };
+}
+function sentenceAt(text, pos) {
+  const para = paragraphAt(text, pos);
+  const chunk = text.slice(para.start, para.end);
+  const re = /[^.!?]+(?:[.!?]+["')\]]*\s*|$)/g;
+  let m;
+  while ((m = re.exec(chunk))) {
+    const s = para.start + m.index, e = s + m[0].length;
+    if (pos >= s && pos <= e) {
+      let st = s, en = e;
+      while (st < en && /\s/.test(text[st])) st++;
+      while (en > st && /\s/.test(text[en - 1])) en--;
+      return { start: st, end: en };
+    }
+    if (!m[0]) break;
+  }
+  return para;
+}
+function getScope(kind) {
+  const text = current.post.body;
+  let { start, end } = lastSel;
+  if (end > start) {
+    while (start < end && /\s/.test(text[start])) start++;
+    while (end > start && /\s/.test(text[end - 1])) end--;
+    return { start, end, label: "selection" };
+  }
+  const r = kind === "clarify" ? sentenceAt(text, start) : paragraphAt(text, start);
+  return { ...r, label: kind === "clarify" ? "sentence" : "paragraph" };
+}
+function updateScope() {
+  const el = $("#scope");
+  if (!el || !current) return;
+  const { start, end } = lastSel;
+  const n = end > start ? wordCount(current.post.body.slice(start, end)) : 0;
+  el.textContent = n ? `Acts on your selection (${n} words)` : current.post.body.trim() ? "Acts on the paragraph your cursor is in" : "";
+}
+function locate(card) {
+  const body = current.post.body;
+  if (body.slice(card.start, card.end) === card.original) return { start: card.start, end: card.end };
+  const i = body.indexOf(card.original);
+  if (i >= 0 && body.indexOf(card.original, i + 1) < 0) return { start: i, end: i + card.original.length };
+  return null;
+}
+/** Replace a range in the draft keeping the browser's own Undo working. */
+function replaceRange(start, end, text) {
+  const ta = draft();
+  ta.focus();
+  ta.setSelectionRange(start, end);
+  let ok = false;
+  try { ok = document.execCommand("insertText", false, text); } catch {}
+  if (!ok || ta.value.slice(start, start + text.length) !== text) ta.setRangeText(text, start, end, "end");
+  current.post.body = ta.value;
+  lastSel = { start: start + text.length, end: start + text.length };
+  autogrow(); updateStats(); scheduleSave();
+}
+function selectInDraft(start, end) {
+  const ta = draft();
+  ta.focus();
+  ta.setSelectionRange(start, end);
+  lastSel = { start, end };
+  updateScope();
+  // scroll the selection into view: measure with a mirror element
+  const mirror = h("div", { class: "draft mirror" });
+  const cs = getComputedStyle(ta);
+  mirror.style.width = ta.clientWidth + "px";
+  mirror.style.font = cs.font;
+  mirror.style.padding = cs.padding;
+  mirror.style.lineHeight = cs.lineHeight;
+  mirror.textContent = ta.value.slice(0, start);
+  const mark = h("span", {}, "|");
+  mirror.append(mark);
+  document.body.append(mirror);
+  const top = mark.offsetTop;
+  mirror.remove();
+  const y = ta.getBoundingClientRect().top + window.scrollY + top - window.innerHeight / 3;
+  window.scrollTo({ top: Math.max(0, y), behavior: "smooth" });
+}
+
+// ---------- notes & research panel ----------
+function notesPanel() {
+  return h("aside", { class: "notes-col", id: "notesCol", "aria-label": "Notes and research" },
+    h("div", { class: "panel-head" }, h("h2", {}, "Notes & research"),
+      h("button", { class: "ghost small", onclick: runOutline, title: "Suggest an outline from your notes" }, "Outline from notes")),
+    h("div", { class: "note-add" },
+      h("textarea", { id: "newNote", rows: "3", placeholder: `Jot a thought, a fact, a line you might use… (${MOD}+Enter to add)`,
+        onkeydown: (e) => { if ((isMac ? e.metaKey : e.ctrlKey) && e.key === "Enter") { e.preventDefault(); addNoteFromBox(); } } }),
+      h("div", { class: "row between" },
+        h("button", { class: "ghost small", onclick: () => { const f = $("#sourceForm"); f.hidden = !f.hidden; if (!f.hidden) $("#srcUrl").focus(); } }, "+ Source"),
+        h("button", { class: "primary small", onclick: addNoteFromBox }, "Add note")),
+      h("div", { id: "sourceForm", class: "source-form", hidden: true },
+        h("input", { id: "srcUrl", type: "url", placeholder: "https://… (link to the source)" }),
+        h("input", { id: "srcTitle", placeholder: "Title" }),
+        h("textarea", { id: "srcText", rows: "4", placeholder: "Key facts in your own words, or paste an excerpt and summarize it" }),
+        h("div", { class: "row between" },
+          h("button", { class: "ghost small", id: "srcSummarize", onclick: summarizeSource, title: "Turn a pasted excerpt into short factual bullets" }, "Summarize excerpt"),
+          h("button", { class: "primary small", onclick: addSource }, "Save source")))),
+    h("div", { class: "note-filters", role: "tablist" },
+      ["all", "note", "source", "question"].map((k) => h("button", { class: "filter" + (noteFilter === k ? " on" : ""), role: "tab", "aria-selected": String(noteFilter === k),
+        onclick: () => { noteFilter = k; renderNotes(); } }, { all: "All", note: "Notes", source: "Sources", question: "Questions" }[k])),
+      h("input", { class: "note-search", type: "search", placeholder: "Search", value: noteQuery, "aria-label": "Search notes", oninput: (e) => { noteQuery = e.target.value; renderNotes(); } })),
+    h("ul", { class: "notes", id: "noteList" }, noteItems()));
+}
+function noteItems() {
+  const p = current.post;
+  const q = noteQuery.trim().toLowerCase();
+  const list = p.notes.filter((n) => (noteFilter === "all" || n.kind === noteFilter) && (!q || `${n.title} ${n.text} ${n.url}`.toLowerCase().includes(q)));
+  if (!list.length) return [h("li", { class: "empty" }, p.notes.length ? "Nothing matches." : "Notes, sources and questions you save will collect here.")];
+  return list.slice().reverse().map((n) => h("li", { class: "note " + n.kind, "data-id": n.id },
+    n.kind !== "note" ? h("span", { class: "chip" }, n.kind === "source" ? "Source" : "Question") : null,
+    n.kind === "source" && (n.title || n.url) ? h("div", { class: "note-title" }, n.url ? h("a", { href: n.url, target: "_blank", rel: "noopener noreferrer" }, n.title || n.url) : n.title) : null,
+    h("div", { class: "note-text", contenteditable: "true", spellcheck: "true", "aria-label": "Edit note",
+      onblur: (e) => { const t = e.target.innerText.trim(); if (t !== n.text) { n.text = t; scheduleSave(); } } }, n.text),
+    h("div", { class: "note-actions" },
+      h("button", { class: "link-btn", onmousedown: (e) => e.preventDefault(), onclick: () => insertAtCursor(n.kind === "source" && n.url ? `${n.text}` : n.text), title: "Insert this note's text at your cursor in the draft" }, "Insert"),
+      n.kind === "source" && n.url ? h("button", { class: "link-btn", onmousedown: (e) => e.preventDefault(), onclick: () => insertAtCursor(`[${n.title || "source"}](${n.url})`), title: "Insert a Markdown link to this source" }, "Insert link") : null,
+      h("span", { class: "note-date" }, timeAgo(n.created)),
+      h("button", { class: "link-btn danger", onclick: () => { removeNote(n.id); } }, "Delete"))));
+}
+function renderNotes() {
+  const list = $("#noteList");
+  if (list) list.replaceChildren(...noteItems());
+  document.querySelectorAll(".note-filters .filter").forEach((b, i) => {
+    const k = ["all", "note", "source", "question"][i];
+    b.classList.toggle("on", k === noteFilter);
+    b.setAttribute("aria-selected", String(k === noteFilter));
+  });
+}
+function addNote(note) {
+  current.post.notes.push(note);
+  scheduleSave();
+  renderNotes();
+}
+function removeNote(id) {
+  const p = current.post;
+  const i = p.notes.findIndex((n) => n.id === id);
+  if (i < 0) return;
+  const [gone] = p.notes.splice(i, 1);
+  scheduleSave();
+  renderNotes();
+  toast("Note deleted", { action: { label: "Undo", run: () => { p.notes.splice(i, 0, gone); scheduleSave(); renderNotes(); } } });
+}
+function addNoteFromBox() {
+  const box = $("#newNote");
+  const text = box.value.trim();
+  if (!text) { box.focus(); return; }
+  addNote(store.blankNote("note", { text }));
+  box.value = "";
+  box.focus();
+}
+function addSource() {
+  const url = $("#srcUrl").value.trim(), title = $("#srcTitle").value.trim(), text = $("#srcText").value.trim();
+  if (!url && !text) { $("#srcUrl").focus(); return; }
+  addNote(store.blankNote("source", { url, title, text }));
+  $("#srcUrl").value = $("#srcTitle").value = $("#srcText").value = "";
+  $("#sourceForm").hidden = true;
+}
+async function summarizeSource() {
+  const text = $("#srcText").value.trim();
+  if (wordCount(text) < 40) { toast("Paste a longer excerpt (40+ words) to summarize."); return; }
+  if (!requireModel()) return;
+  const btn = $("#srcSummarize");
+  btn.disabled = true; btn.textContent = "Summarizing…";
+  try {
+    const out = await complete({ ...P.summarizeSourcePrompt({ url: $("#srcUrl").value, title: $("#srcTitle").value, text }), maxTokens: 700, onText: (t) => ($("#srcText").value = t) });
+    $("#srcText").value = out.trim();
+  } catch (e) { $("#srcText").value = text; toast(e.message, { error: true }); }
+  finally { btn.disabled = false; btn.textContent = "Summarize excerpt"; }
+}
+function insertAtCursor(text) {
+  const ta = draft();
+  const { start, end } = lastSel;
+  const before = ta.value.slice(0, start);
+  const pad = before && !/\s$/.test(before) ? " " : "";
+  replaceRange(start, end, pad + text);
+}
+function toggleNotes() {
+  const s = store.getSettings();
+  s.notesOpen = !s.notesOpen;
+  store.saveSettings(s);
+  $("#workspace").classList.toggle("notes-closed", !s.notesOpen);
+  const b = $(".notes-toggle");
+  b.textContent = s.notesOpen ? "Hide notes" : "Notes";
+  b.setAttribute("aria-expanded", String(s.notesOpen));
+  autogrow();
+}
+function toggleFocus() {
+  const on = document.body.classList.toggle("focus");
+  $("#focusBtn").textContent = on ? "Exit focus" : "Focus";
+  autogrow();
+  draft().focus();
+}
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && document.body.classList.contains("focus") && !document.querySelector("dialog[open]")) toggleFocus(); });
+
+// ---------- assistant panel ----------
+function assistantPanel() {
+  return h("aside", { class: "assist-col", "aria-label": "Assistant" },
+    h("div", { class: "panel-head" }, h("h2", {}, "Assistant"),
+      h("button", { class: "ghost small", id: "clearCards", onclick: () => { cards = []; renderCards(); } }, "Clear")),
+    h("div", { id: "cards", class: "cards", "aria-live": "polite" }));
+}
+function assistIntro() {
+  return h("div", { class: "assist-intro" },
+    h("p", {}, "You write; I suggest. Nothing changes in your draft unless you accept it."),
+    h("dl", {},
+      h("dt", {}, "Fix grammar"), h("dd", {}, "Spelling, grammar and punctuation only. You see every change before accepting."),
+      h("dt", {}, "Clarify"), h("dd", {}, "Points out what a reader might trip on and offers wordings close to yours."),
+      h("dt", {}, "Prompt me"), h("dd", {}, "Questions to get you unstuck. You answer them in your own words."),
+      h("dt", {}, "Review"), h("dd", {}, "An editor's margin notes on the whole draft. No rewrites.")),
+    h("p", { class: "hint" }, `Select text first to target it; otherwise tools act on the paragraph or sentence at your cursor. Shortcuts: ${MOD}+Alt+1 to 4.`),
+    isReady() ? null : h("button", { class: "primary small", onclick: openSettings }, "Connect a model"));
+}
+function renderCards() {
+  const box = $("#cards");
+  if (!box) return;
+  $("#clearCards").hidden = !cards.length;
+  box.replaceChildren(...(cards.length ? cards.map(cardView) : [assistIntro()]));
+}
+function addCard(card) {
+  card.id = store.newId();
+  cards.unshift(card);
+  if (cards.length > 25) cards.length = 25;
+  renderCards();
+  return card;
+}
+function updateCard(card, patch) {
+  Object.assign(card, patch);
+  renderCards();
+}
+function dropCard(card) {
+  cards = cards.filter((c) => c !== card);
+  renderCards();
+}
+function requireModel() {
+  if (isReady()) return true;
+  toast("Connect a model to use the assistant.", { action: { label: "Connect", run: openSettings } });
+  return false;
+}
+const KIND_LABEL = { grammar: "Grammar", clarify: "Clarify", prompt: "Prompt me", review: "Review", outline: "Outline" };
+
+function cardView(c) {
+  const head = h("div", { class: "card-head" },
+    h("span", { class: "card-kind" }, KIND_LABEL[c.kind]),
+    c.scopeLabel ? h("span", { class: "card-scope" }, c.scopeLabel) : null,
+    h("button", { class: "icon-btn small", "aria-label": "Dismiss", title: "Dismiss", onclick: () => { c.ctl?.abort(); dropCard(c); } }, "×"));
+  const el = h("article", { class: "card " + c.kind + (c.done ? " done" : "") }, head);
+  if (c.original && c.kind !== "review") {
+    el.append(h("button", { class: "quote", title: "Show in draft", onclick: () => { const r = locate(c); if (r) selectInDraft(r.start, r.end); else toast("That text has changed in your draft."); } }, clip(c.original, 160)));
+  }
+  if (c.pending) {
+    el.append(h("div", { class: "thinking" }, h("span", { class: "spinner", "aria-hidden": "true" }), c.progress || "Thinking…",
+      h("button", { class: "link-btn", onclick: () => c.ctl?.abort() }, "Stop")));
+    return el;
+  }
+  if (c.error) { el.append(h("p", { class: "status err" }, c.error)); return el; }
+
+  if (c.kind === "grammar") {
+    if (c.result === c.original) { el.append(h("p", { class: "ok-text" }, "No grammar or spelling issues found.")); return el; }
+    const parts = wordDiff(c.original, c.result);
+    el.append(h("p", { class: "diff" }, parts.map((p) => p.type === "same" ? p.text : h(p.type === "add" ? "ins" : "del", {}, p.text))));
+    el.append(h("div", { class: "row between" },
+      h("span", { class: "hint" }, `${changeCount(parts)} change${changeCount(parts) === 1 ? "" : "s"}`),
+      c.done ? h("span", { class: "ok-text" }, "Accepted") : h("div", { class: "row" },
+        h("button", { class: "ghost small", onclick: () => dropCard(c) }, "Dismiss"),
+        h("button", { class: "primary small", onclick: () => acceptText(c, c.result) }, "Accept"))));
+  }
+
+  if (c.kind === "clarify") {
+    el.append(h("p", { class: "issue" }, c.result.issue || ""));
+    (c.result.options || []).forEach((o, i) => {
+      el.append(h("div", { class: "option" + (c.chosen === i ? " chosen" : "") },
+        h("p", { class: "diff" }, wordDiff(c.original, o.text).map((p) => p.type === "same" ? p.text : p.type === "add" ? h("ins", {}, p.text) : h("del", {}, p.text))),
+        o.why ? h("p", { class: "hint" }, o.why) : null,
+        c.done ? null : h("button", { class: "ghost small", onclick: () => { c.chosen = i; acceptText(c, o.text); } }, "Use this")));
+    });
+    if (c.result.question) el.append(h("p", { class: "question" }, h("strong", {}, "Question for you: "), c.result.question,
+      h("button", { class: "link-btn", onclick: () => { addNote(store.blankNote("question", { text: c.result.question })); toast("Saved to notes"); } }, " Save to notes")));
+    if (c.done) el.append(h("p", { class: "ok-text" }, "Applied. Undo with " + MOD + "+Z in the draft."));
+  }
+
+  if (c.kind === "prompt") {
+    el.append(h("p", { class: "hint" }, "Answer whichever sparks something, in your own words."));
+    el.append(h("ul", { class: "qs" }, c.result.map((q, i) => h("li", { class: c.saved?.[i] ? "saved" : "" },
+      h("span", {}, q),
+      c.saved?.[i] ? h("span", { class: "ok-text small-text" }, "In notes") : h("button", { class: "link-btn", onclick: () => { addNote(store.blankNote("question", { text: q })); (c.saved ||= {})[i] = true; renderCards(); } }, "Save to notes")))));
+    el.append(h("div", { class: "row end" }, h("button", { class: "ghost small", onclick: () => runPromptMe() }, "Different questions")));
+  }
+
+  if (c.kind === "review") {
+    if (!c.result.length) el.append(h("p", { class: "ok-text" }, "No notes. It reads clearly."));
+    el.append(h("ol", { class: "review" }, c.result.map((r, i) => {
+      const found = current.post.body.indexOf(r.quote);
+      return h("li", { class: c.checked?.[i] ? "checked" : "" },
+        h("div", { class: "row between nowrap" }, h("span", { class: "chip kind-" + slugify(r.kind || "note") }, r.kind || "note"),
+          h("label", { class: "check small-text" }, h("input", { type: "checkbox", checked: !!c.checked?.[i], onchange: (e) => { (c.checked ||= {})[i] = e.target.checked; renderCards(); } }), "Done")),
+        h("button", { class: "quote", disabled: found < 0, title: found < 0 ? "Not found in the draft any more" : "Show in draft",
+          onclick: () => { const j = current.post.body.indexOf(r.quote); if (j >= 0) selectInDraft(j, j + r.quote.length); } }, clip(r.quote, 120)),
+        h("p", {}, r.note));
+    })));
+    el.append(h("div", { class: "row end" }, h("button", { class: "ghost small", onclick: () => runReview() }, "Review again")));
+  }
+
+  if (c.kind === "outline") {
+    el.append(h("ol", { class: "outline" }, c.result.map((o) => h("li", {}, h("strong", {}, o.heading), o.covers ? h("span", { class: "hint" }, " " + o.covers) : null))));
+    el.append(h("div", { class: "row end" }, c.done ? h("span", { class: "ok-text" }, "Inserted") : h("button", { class: "ghost small", onclick: () => {
+      const text = c.result.map((o) => `## ${o.heading}\n\n`).join("");
+      insertAtCursor((current.post.body.trim() ? "\n\n" : "") + text);
+      current.post.aiChars += addedChars("", c.result.map((o) => o.heading).join(" "));
+      updateStats();
+      updateCard(c, { done: true });
+    } }, "Insert headings at cursor")));
+  }
+  return el;
+}
+
+function acceptText(card, text) {
+  const r = locate(card);
+  if (!r) { toast("That passage changed since you asked. Run the tool again.", { error: true }); return; }
+  replaceRange(r.start, r.end, text);
+  current.post.aiChars += addedChars(card.original, text);
+  updateStats();
+  updateCard(card, { done: true });
+}
+
+async function runTool(card, fn) {
+  card.ctl = new AbortController();
+  card.pending = true;
+  addCard(card);
+  try {
+    const result = await fn(card.ctl.signal);
+    updateCard(card, { pending: false, result });
+  } catch (e) {
+    if (e.cancelled) dropCard(card);
+    else updateCard(card, { pending: false, error: e.message });
+  }
+}
+
+function runGrammar() {
+  if (!requireModel()) return;
+  const body = current.post.body;
+  if (!body.trim()) { toast("Write something first."); return; }
+  const sc = getScope("grammar");
+  if (sc.end <= sc.start) { toast("Put your cursor in a paragraph, or select some text."); return; }
+  const original = body.slice(sc.start, sc.end);
+  runTool({ kind: "grammar", start: sc.start, end: sc.end, original, scopeLabel: sc.label }, async (signal) => {
+    let out = await complete({ ...P.grammarPrompt(current.post, original), signal, maxTokens: Math.min(8000, 200 + original.length) });
+    out = out.replace(/^\s*<text>\s*|\s*<\/text>\s*$/g, "");
+    // keep the writer's surrounding whitespace exactly
+    return out.trim() === original.trim() ? original : out.trim();
+  });
+}
+function runClarify() {
+  if (!requireModel()) return;
+  const body = current.post.body;
+  const sc = getScope("clarify");
+  if (sc.end <= sc.start) { toast("Put your cursor in a sentence, or select some text."); return; }
+  const original = body.slice(sc.start, sc.end);
+  if (wordCount(original) < 4) { toast("Select a little more (a full sentence works best)."); return; }
+  runTool({ kind: "clarify", start: sc.start, end: sc.end, original, scopeLabel: sc.label }, async (signal) => {
+    const r = await completeJSON({ ...P.clarifyPrompt(current.post, original), signal, maxTokens: 1200 });
+    if (!r || typeof r !== "object") throw new Error("Unexpected reply. Try again.");
+    r.options = (Array.isArray(r.options) ? r.options : []).filter((o) => o && typeof o.text === "string" && o.text.trim()).slice(0, 3);
+    return r;
+  });
+}
+function runPromptMe() {
+  if (!requireModel()) return;
+  const pos = lastSel.start;
+  const before = current.post.body.slice(Math.max(0, pos - 1500), pos);
+  runTool({ kind: "prompt", scopeLabel: before.trim() ? "where you are" : "the whole post" }, async (signal) => {
+    const qs = await completeJSON({ ...P.promptMePrompt(current.post, before.trim()), signal, maxTokens: 600 });
+    const list = (Array.isArray(qs) ? qs : []).map(String).filter((q) => q.trim()).slice(0, 6);
+    if (!list.length) throw new Error("No questions came back. Try again.");
+    return list;
+  });
+}
+function runReview() {
+  if (!requireModel()) return;
+  if (wordCount(current.post.body) < 60) { toast("Review works best once you have a few paragraphs."); return; }
+  runTool({ kind: "review", scopeLabel: `${wordCount(current.post.body)} words` }, async (signal) => {
+    const notes = await completeJSON({ ...P.reviewPrompt(current.post), signal, maxTokens: 2000 });
+    return (Array.isArray(notes) ? notes : []).filter((n) => n && n.quote && n.note).map((n) => ({ quote: String(n.quote).trim(), kind: String(n.kind || "note"), note: String(n.note) }));
+  });
+}
+function runOutline() {
+  if (!requireModel()) return;
+  if (!current.post.notes.length && wordCount(current.post.body) < 30) { toast("Add a few notes first; the outline is built from them."); return; }
+  runTool({ kind: "outline", scopeLabel: `${current.post.notes.length} notes` }, async (signal) => {
+    const o = await completeJSON({ ...P.outlinePrompt(current.post), signal, maxTokens: 900 });
+    const list = (Array.isArray(o) ? o : []).filter((x) => x && x.heading).map((x) => ({ heading: String(x.heading), covers: String(x.covers || "") }));
+    if (!list.length) throw new Error("No outline came back. Try again.");
+    return list;
   });
 }
 
-async function askMore() {
-  if (!isReady()) { openSettings(); return; }
-  const post = current.post, sec = curSection();
-  const btn = $("#askBtn");
-  btn.disabled = true;
-  setStatus("Thinking of questions…");
-  try {
-    const qs = await completeJSON({ ...questionsPrompt(post, sec), maxTokens: 600 });
-    const add = (Array.isArray(qs) ? qs : []).map(String).filter((q) => q.trim());
-    if (!add.length) throw new Error("No questions came back. Try again.");
-    sec.questions.push(...add);
-    store.savePost(post);
-    renderEditor(post, sec.id);
-    toast(`Added ${add.length} questions`);
-  } catch (e) {
-    setStatus(e.message, true);
-  } finally {
-    const b = $("#askBtn");
-    if (b) b.disabled = false;
-  }
+// ---------- versions ----------
+function openVersions() {
+  $("#versionLabel").value = "";
+  renderVersions();
+  $("#versionsDlg").showModal();
 }
+function renderVersions() {
+  const p = current.post;
+  const list = $("#versionList");
+  if (!p.snapshots.length) { list.replaceChildren(h("li", { class: "hint" }, "No saved versions yet.")); return; }
+  list.replaceChildren(...p.snapshots.slice().reverse().map((s) => h("li", {},
+    h("div", { class: "version-meta" }, h("strong", {}, s.label || "Saved version"), h("span", { class: "hint" }, `${stamp(s.at)} · ${wordCount(s.body).toLocaleString()} words`)),
+    h("p", { class: "version-peek" }, clip(s.body.replace(/\s+/g, " "), 180)),
+    h("div", { class: "row" },
+      h("button", { class: "ghost small", onclick: () => copyText(s.body, "Version copied") }, "Copy text"),
+      h("button", { class: "ghost small", onclick: async () => {
+        if (!(await confirmAction("Replace the current draft with this version? The current draft is saved as a version first.", "Restore"))) { $("#versionsDlg").showModal(); return; }
+        addSnapshot("Before restore");
+        current.post.body = s.body;
+        store.savePost(current.post);
+        $("#versionsDlg").close();
+        renderEditor(current.post);
+        toast("Version restored");
+      } }, "Restore"),
+      h("button", { class: "link-btn danger", onclick: () => { p.snapshots = p.snapshots.filter((x) => x !== s); scheduleSave(); renderVersions(); } }, "Delete")))));
+}
+$("#saveVersion").addEventListener("click", () => {
+  addSnapshot($("#versionLabel").value.trim() || "Saved version");
+  $("#versionLabel").value = "";
+  store.savePost(current.post);
+  renderVersions();
+  toast("Version saved");
+});
+$("#versionsClose").addEventListener("click", () => $("#versionsDlg").close());
 
 // ---------- voice ----------
 function openVoice() {
@@ -441,31 +764,26 @@ $("#learnBtn").addEventListener("click", async () => {
   btn.disabled = true;
   $("#learnStatus").textContent = "Reading your writing…";
   try {
-    const guide = await complete({ ...voicePrompt(samples), maxTokens: 900, onText: (t) => (out.value = t) });
+    const guide = await complete({ ...P.voicePrompt(samples), maxTokens: 900, onText: (t) => (out.value = t) });
     out.value = guide.trim();
     current.post.voice = out.value;
     store.savePost(current.post);
     $("#learnStatus").textContent = "Drafted. Edit it until it sounds right.";
-  } catch (e) {
-    out.value = before;
-    $("#learnStatus").textContent = e.message;
-  } finally {
-    btn.disabled = false;
-  }
+  } catch (e) { out.value = before; $("#learnStatus").textContent = e.message; }
+  finally { btn.disabled = false; }
 });
 
-// ---------- preview & export ----------
-function openPreview() {
-  const md = postToMarkdown(current.post, { frontMatter: false });
-  $("#previewBody").innerHTML = renderMarkdown(md) || "<p class='hint'>Nothing phrased yet.</p>";
-  $("#previewDlg").showModal();
+// ---------- export ----------
+function openExport() {
+  flushSave();
+  $("#exportBody").innerHTML = renderMarkdown(`# ${current.post.title}\n\n${current.post.body}`);
+  $("#exportDlg").showModal();
 }
-$("#previewClose").addEventListener("click", () => $("#previewDlg").close());
+$("#exportClose").addEventListener("click", () => $("#exportDlg").close());
 $("#copyMd").addEventListener("click", () => copyText(postToMarkdown(current.post, { frontMatter: $("#frontMatter").checked })));
 $("#downloadMd").addEventListener("click", () => {
   const p = current.post;
-  const name = `${new Date().toISOString().slice(0, 10)}-${slugify(p.title)}.md`;
-  downloadText(name, postToMarkdown(p, { frontMatter: $("#frontMatter").checked }));
+  downloadText(`${new Date().toISOString().slice(0, 10)}-${slugify(p.title)}.md`, postToMarkdown(p, { frontMatter: $("#frontMatter").checked }));
 });
 
 // ---------- settings ----------
@@ -474,22 +792,23 @@ function openSettings() {
   $("#testStatus").textContent = "";
   $("#settingsDlg").showModal();
 }
-$("#settingsDlg").addEventListener("close", () => route());
+$("#settingsDlg").addEventListener("close", () => {
+  // refresh just the model button and assistant intro, keeping the draft and cursor
+  document.querySelectorAll(".model-btn").forEach((b) => b.replaceWith(modelButton()));
+  if (current) renderCards(); else renderHome();
+});
 
 function renderSettings() {
   const s = store.getSettings();
-  const list = $("#providerList");
-  list.replaceChildren(h("legend", { class: "sr-only" }, "Provider"),
+  $("#providerList").replaceChildren(h("legend", { class: "sr-only" }, "Provider"),
     ...Object.entries(PROVIDERS).map(([id, p]) => {
       const connected = id === "ollama" || id === "custom" ? null : !!store.getSecret(id);
       return h("label", { class: "provider" + (s.provider === id ? " on" : "") },
         h("input", { type: "radio", name: "provider", value: id, checked: s.provider === id,
           onchange: () => { const st = store.getSettings(); st.provider = id; store.saveSettings(st); renderSettings(); } }),
-        h("span", { class: "provider-name" }, p.label, connected ? h("span", { class: "pill" }, "connected") : null),
-        h("span", { class: "provider-blurb" }, p.blurb)
-      );
-    })
-  );
+        h("span", { class: "provider-name" }, p.label, connected ? h("span", { class: "pill" }, "key saved") : null),
+        h("span", { class: "provider-blurb" }, p.blurb));
+    }));
   $("#rememberKeys").checked = s.rememberKeys;
   renderProviderConfig();
 }
@@ -497,73 +816,68 @@ function renderSettings() {
 function renderProviderConfig() {
   const s = store.getSettings();
   const id = s.provider, p = PROVIDERS[id];
-  const box = $("#providerConfig");
   const kids = [];
-
   if (p.auth === "oauth") {
-    const key = store.getSecret(id);
-    kids.push(key
+    kids.push(store.getSecret(id)
       ? h("div", { class: "row between connected-box" },
           h("span", {}, "Signed in to OpenRouter. Usage is billed to your OpenRouter account."),
           h("button", { type: "button", class: "ghost small", onclick: () => { store.setSecret(id, ""); renderSettings(); } }, "Sign out"))
       : h("div", { class: "stack" },
-          h("button", { type: "button", class: "primary", onclick: () => startOpenRouterLogin().catch((e) => toast(e.message, true)) }, "Sign in with OpenRouter"),
-          h("details", {}, h("summary", {}, "Or paste an OpenRouter key"),
-            keyField(id, p))));
+          h("button", { type: "button", class: "primary", onclick: () => startOpenRouterLogin().catch((e) => toast(e.message, { error: true })) }, "Sign in with OpenRouter"),
+          h("details", {}, h("summary", {}, "Or paste an OpenRouter key"), keyField(id, p))));
   }
   if (p.auth === "key") kids.push(keyField(id, p));
   if (p.auth === "url" || p.auth === "url+key") {
-    const url = h("input", { type: "url", placeholder: id === "ollama" ? "http://localhost:11434" : "https://host/v1", "aria-label": "Server address",
-      oninput: (e) => { const st = store.getSettings(); st.baseUrls[id] = e.target.value.trim(); store.saveSettings(st); } });
-    url.value = s.baseUrls[id] || "";
+    const url = h("input", { type: "url", value: s.baseUrls[id] || "", placeholder: id === "ollama" ? "http://localhost:11434" : "https://host/v1", "aria-label": "Server address",
+      oninput: (e) => { const st = store.getSettings(); st.baseUrls[id] = e.target.value.trim().replace(/\/+$/, ""); store.saveSettings(st); } });
     kids.push(h("label", { class: "field" }, h("span", {}, "Server address"), url));
     if (id === "ollama") kids.push(h("p", { class: "hint" },
-      "Ollama must allow this site. Quit Ollama, then start it with ", h("code", {}, `OLLAMA_ORIGINS=${location.origin} ollama serve`),
-      ". Browsers only allow http:// to localhost from a secure page, so a model on another machine needs an https address (for example ", h("code", {}, "tailscale serve"), ")."));
+      "Ollama must allow this site: set ", h("code", {}, `OLLAMA_ORIGINS=${location.origin}`),
+      " and restart it. From this https page, browsers only allow http to localhost; for a model on another machine give it an https address (for example ", h("code", {}, "tailscale serve 11434"), ")."));
     if (p.auth === "url+key") kids.push(keyField(id, p, true));
   }
-
-  const model = h("input", { list: "modelOptions", "aria-label": "Model", placeholder: "model name",
+  const model = h("input", { list: "modelOptions", value: s.models[id] || "", "aria-label": "Model", placeholder: "model name",
     oninput: (e) => { const st = store.getSettings(); st.models[id] = e.target.value.trim(); store.saveSettings(st); } });
-  model.value = s.models[id] || "";
   const dl = h("datalist", { id: "modelOptions" });
-  const loadBtn = h("button", { type: "button", class: "ghost small", onclick: async () => {
-    loadBtn.disabled = true; loadBtn.textContent = "Loading…";
-    try {
-      const ids = await listModels();
-      dl.replaceChildren(...ids.map((m) => h("option", { value: m })));
-      loadBtn.textContent = `${ids.length} models`;
-      model.focus();
-    } catch (e) { loadBtn.textContent = "List models"; toast(e.message, true); }
-    finally { loadBtn.disabled = false; }
-  } }, "List models");
+  const loadBtn = h("button", { type: "button", class: "ghost small", onclick: () => loadModels(model, dl, loadBtn) }, "List models");
   kids.push(h("label", { class: "field" }, h("span", {}, "Model"), h("div", { class: "row nowrap" }, model, loadBtn)), dl);
-  box.replaceChildren(...kids);
+  $("#providerConfig").replaceChildren(...kids);
+  if (isReady()) loadModels(model, dl, loadBtn, true);
 }
-
+async function loadModels(input, dl, btn, quiet = false) {
+  btn.disabled = true; btn.textContent = "Loading…";
+  try {
+    const ids = await listModels();
+    dl.replaceChildren(...ids.map((m) => h("option", { value: m })));
+    btn.textContent = `${ids.length} models`;
+    // If the saved model isn't offered, pick a sensible one.
+    if (ids.length && !ids.includes(input.value)) {
+      const pick = ids.find((m) => /sonnet/i.test(m)) || ids.find((m) => /instruct|chat|qwen|llama|gpt|gemini/i.test(m)) || ids[0];
+      input.value = pick;
+      const st = store.getSettings(); st.models[st.provider] = pick; store.saveSettings(st);
+      if (!quiet) toast(`Model set to ${pick}`);
+    }
+  } catch (e) { btn.textContent = "List models"; if (!quiet) toast(e.message, { error: true }); }
+  finally { btn.disabled = false; }
+}
 function keyField(id, p, optional = false) {
-  const inp = h("input", { type: "password", autocomplete: "off", spellcheck: "false", "aria-label": `${p.label} API key`,
+  const inp = h("input", { type: "password", autocomplete: "off", spellcheck: "false", value: store.getSecret(id), "aria-label": `${p.label} API key`,
     placeholder: optional ? "API key (if the server needs one)" : "Paste your API key",
     onchange: (e) => { store.setSecret(id, e.target.value.trim()); renderSettings(); } });
-  inp.value = store.getSecret(id);
   return h("label", { class: "field" },
-    h("span", {}, "API key ", p.keyHelp ? h("a", { href: p.keyHelp, target: "_blank", rel: "noopener noreferrer" }, "get one") : null),
-    inp);
+    h("span", {}, "API key ", p.keyHelp ? h("a", { href: p.keyHelp, target: "_blank", rel: "noopener noreferrer" }, "get one") : null), inp);
 }
-
 $("#rememberKeys").addEventListener("change", (e) => {
   const s = store.getSettings();
   const keys = Object.keys(PROVIDERS).map((id) => [id, store.getSecret(id)]);
   s.rememberKeys = e.target.checked;
   store.saveSettings(s);
-  keys.forEach(([id, k]) => store.setSecret(id, k)); // move keys to the right storage
+  keys.forEach(([id, k]) => store.setSecret(id, k));
 });
 $("#forgetKeys").addEventListener("click", async () => {
-  if (await confirmAction("Forget every saved key and sign-in on this device?", "Forget")) {
-    store.forgetAllSecrets();
-    renderSettings();
-    toast("Keys forgotten");
-  }
+  $("#settingsDlg").close();
+  if (await confirmAction("Forget every saved key and sign-in on this device?", "Forget")) { store.forgetAllSecrets(); toast("Keys forgotten"); }
+  openSettings();
 });
 $("#testBtn").addEventListener("click", async () => {
   const st = $("#testStatus");
@@ -571,25 +885,15 @@ $("#testBtn").addEventListener("click", async () => {
   st.classList.remove("err");
   try {
     const t = await complete({ prompt: "Reply with exactly: ready", maxTokens: 20 });
-    st.textContent = t.trim() ? "Works" : "Connected, but the reply was empty";
-  } catch (e) {
-    st.textContent = e.message;
-    st.classList.add("err");
-  }
+    st.textContent = t.trim() ? "Works. The assistant is ready." : "Connected, but the reply was empty.";
+  } catch (e) { st.textContent = e.message; st.classList.add("err"); }
 });
 
 // ---------- boot ----------
 (async () => {
   try {
     const back = await finishOpenRouterLogin();
-    if (back !== null) {
-      const s = store.getSettings();
-      s.provider = "openrouter";
-      store.saveSettings(s);
-      toast("Signed in to OpenRouter");
-    }
-  } catch (e) {
-    toast(e.message, true);
-  }
+    if (back !== null) { const s = store.getSettings(); s.provider = "openrouter"; store.saveSettings(s); toast("Signed in to OpenRouter"); }
+  } catch (e) { toast(e.message, { error: true }); }
   route();
 })();

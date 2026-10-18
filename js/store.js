@@ -1,19 +1,18 @@
 // Everything lives in this browser's localStorage. Nothing is sent anywhere
 // except the prompts you choose to send to the model provider you configure.
 
-const POSTS_KEY = "dd.posts.v1";      // { [id]: Post }
+const POSTS_KEY = "dd.posts.v1";       // { [id]: Post }
 const SETTINGS_KEY = "dd.settings.v1"; // provider choice, model, non-secret prefs
 const SECRET_KEY = "dd.secrets.v1";    // API keys (localStorage or sessionStorage)
 
-export const DEFAULT_VOICE = `Write in the author's own voice, as described below. Edit this guide to match how you write, or use "Learn my voice" to draft it from your past posts.
+export const STATUSES = ["Idea", "Drafting", "Editing", "Ready", "Published"];
 
-- First person, plain and direct. Short declarative sentences mixed with longer explanatory ones. No hype or marketing words.
-- Open with the concrete situation, then the reasoning.
-- Opinionated, but show the trade-off. "I think" for judgments; state facts flatly.
-- Paragraphs over bullet lists; lists only for truly parallel items.
-- Specific numbers and names over adjectives.`;
+export const DEFAULT_VOICE = `Describe how you write so suggestions stay in your voice. Edit freely, or use "Learn from my writing" below.
 
-export const PHRASING_RULES = `Rules for phrasing: keep the writer's own words and phrasings wherever they appear in the notes; only reorder, connect and tidy. Never add a fact, number or claim that is not in the notes or the reference facts. If the notes are thin, write less rather than padding. No intro like "In this post" and no closing summary unless the notes have one.`;
+- First person, plain and direct.
+- Short sentences mixed with longer explanatory ones.
+- Specific numbers and names over adjectives.
+- No hype or marketing words.`;
 
 function read(storage, key, fallback) {
   try {
@@ -40,30 +39,61 @@ export function newId() {
   return [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
 }
 
-export function blankSection(name = "New section") {
-  return { id: newId(), name, notes: "", facts: "", prose: "", questions: [] };
+export function blankNote(kind = "note", fields = {}) {
+  return { id: newId(), kind, text: "", url: "", title: "", created: Date.now(), ...fields };
 }
 
 export function blankPost(title = "Untitled post") {
   const now = Date.now();
   return {
     id: newId(),
+    v: 2,
     title,
+    status: "Idea",
     voice: getSettings().defaultVoice || DEFAULT_VOICE,
-    length: 280,
+    body: "",
+    notes: [],
+    snapshots: [],
+    aiChars: 0, // characters inserted by accepting AI suggestions (approximate)
     created: now,
     updated: now,
-    sections: [blankSection("Introduction")],
   };
 }
 
+/** Bring a v1 post (sections with notes/facts/prose) into the v2 shape. */
+function migrate(p) {
+  if (!p || p.v === 2) return p;
+  const post = { ...blankPost(p.title || "Untitled post"), id: p.id || newId(), created: p.created || Date.now(), updated: p.updated || Date.now() };
+  post.voice = p.voice || post.voice;
+  const parts = [];
+  for (const s of p.sections || []) {
+    const text = (s.prose || "").trim();
+    parts.push(`## ${s.name || "Section"}\n\n${text}`);
+    if ((s.notes || "").trim()) post.notes.push(blankNote("note", { text: `${s.name}: ${s.notes.trim()}` }));
+    if ((s.facts || "").trim()) post.notes.push(blankNote("source", { title: `${s.name}: reference facts`, text: s.facts.trim() }));
+    for (const q of s.questions || []) post.notes.push(blankNote("question", { text: q, title: s.name }));
+  }
+  post.body = parts.join("\n\n").trim() + (parts.length ? "\n" : "");
+  post.status = post.body.replace(/^##.*$/gm, "").trim() ? "Drafting" : "Idea";
+  post.aiChars = (p.sections || []).reduce((n, s) => n + (s.prose || "").length, 0); // v1 prose was AI-written
+  return post;
+}
+
 // ---- posts ----
-export function listPosts() {
+function allPosts() {
   const all = read(localStorage, POSTS_KEY, {});
-  return Object.values(all).sort((a, b) => b.updated - a.updated);
+  let changed = false;
+  for (const id of Object.keys(all)) {
+    if (all[id]?.v !== 2) { all[id] = migrate(all[id]); changed = true; }
+  }
+  if (changed) write(localStorage, POSTS_KEY, all);
+  return all;
+}
+export function listPosts() {
+  return Object.values(allPosts()).sort((a, b) => b.updated - a.updated);
 }
 export function getPost(id) {
-  return read(localStorage, POSTS_KEY, {})[id] || null;
+  return allPosts()[id] || null;
 }
 export function savePost(post) {
   const all = read(localStorage, POSTS_KEY, {});
@@ -78,27 +108,29 @@ export function deletePost(id) {
 }
 /** Import a post object (from a backup or the sample). Always gets a fresh id. */
 export function importPost(obj) {
-  if (!obj || typeof obj !== "object" || !Array.isArray(obj.sections)) {
+  if (!obj || typeof obj !== "object" || (typeof obj.body !== "string" && !Array.isArray(obj.sections))) {
     throw new Error("That file doesn't look like a Drafting Desk post.");
   }
+  const src = obj.v === 2 ? obj : migrate(obj);
   const post = {
-    ...blankPost(String(obj.title || "Imported post")),
-    voice: typeof obj.voice === "string" ? obj.voice : DEFAULT_VOICE,
-    length: Number(obj.length) || 280,
-    sections: obj.sections.map((s) => ({
-      id: newId(),
-      name: String(s.name || "Section"),
-      notes: String(s.notes || ""),
-      facts: String(s.facts || ""),
-      prose: String(s.prose || ""),
-      questions: Array.isArray(s.questions) ? s.questions.map(String) : [],
+    ...blankPost(String(src.title || "Imported post")),
+    status: STATUSES.includes(src.status) ? src.status : "Idea",
+    voice: typeof src.voice === "string" ? src.voice : DEFAULT_VOICE,
+    body: String(src.body || ""),
+    aiChars: Number(src.aiChars) || 0,
+    notes: (Array.isArray(src.notes) ? src.notes : []).map((n) => ({
+      ...blankNote(["note", "source", "question"].includes(n.kind) ? n.kind : "note"),
+      text: String(n.text || ""), url: String(n.url || ""), title: String(n.title || ""),
+    })),
+    snapshots: (Array.isArray(src.snapshots) ? src.snapshots : []).slice(-30).map((s) => ({
+      id: newId(), at: Number(s.at) || Date.now(), label: String(s.label || ""), body: String(s.body || ""),
     })),
   };
   savePost(post);
   return post;
 }
 export function exportAll() {
-  return { app: "drafting-desk", version: 1, exported: new Date().toISOString(), posts: listPosts() };
+  return { app: "drafting-desk", version: 2, exported: new Date().toISOString(), posts: listPosts() };
 }
 
 // ---- settings (non-secret) ----
@@ -106,7 +138,7 @@ const DEFAULT_SETTINGS = {
   provider: "openrouter",
   models: {
     openrouter: "anthropic/claude-sonnet-4.5",
-    anthropic: "claude-sonnet-4-5",
+    anthropic: "claude-sonnet-5-5",
     openai: "gpt-4.1-mini",
     gemini: "gemini-2.5-flash",
     ollama: "qwen2.5:14b",
@@ -115,6 +147,7 @@ const DEFAULT_SETTINGS = {
   baseUrls: { ollama: "http://localhost:11434", custom: "" },
   rememberKeys: true,
   defaultVoice: "",
+  notesOpen: true,
 };
 export function getSettings() {
   const s = read(localStorage, SETTINGS_KEY, {});

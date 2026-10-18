@@ -124,7 +124,11 @@ export async function listModels(settings = getSettings()) {
   }
   if (p === "ollama") {
     const d = await j(trimSlash(settings.baseUrls.ollama) + "/api/tags");
-    return d.models.map((m) => m.name);
+    // Embedding-only models can't chat; hide them.
+    return d.models
+      .filter((m) => !Array.isArray(m.capabilities) || m.capabilities.includes("completion"))
+      .filter((m) => !/embed|minilm|bge|e5-/i.test(m.name))
+      .map((m) => m.name);
   }
   if (p === "custom") {
     const headers = key ? { Authorization: `Bearer ${key}` } : {};
