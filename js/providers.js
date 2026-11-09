@@ -1,5 +1,5 @@
 // Model providers, all called straight from the browser. No proxy, no server.
-import { getSecret, setSecret, getSettings } from "./store.js?v=__V__";
+import { getSecret, setSecret, getSettings } from "./store.js";
 
 export const PROVIDERS = {
   openrouter: {
@@ -74,7 +74,7 @@ export async function finishOpenRouterLogin() {
   history.replaceState(null, "", location.pathname + (saved?.back || ""));
   if (!saved) throw new Error("Sign-in expired. Please try again.");
   const st = params.get("state");
-  if (st && st !== saved.state) throw new Error("Sign-in check failed. Please try again.");
+  if (st !== saved.state) throw new Error("Sign-in check failed. Please try again.");
   const res = await fetch("https://openrouter.ai/api/v1/auth/keys", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -127,7 +127,7 @@ export async function listModels(settings = getSettings()) {
     return d.data.map((m) => m.id).filter((id) => /^(gpt|o\d|chatgpt)/.test(id)).sort();
   }
   if (p === "gemini") {
-    const d = await j(`https://generativelanguage.googleapis.com/v1beta/models?pageSize=200&key=${encodeURIComponent(key)}`);
+    const d = await j("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", { headers: { "x-goog-api-key": key } });
     return d.models
       .filter((m) => (m.supportedGenerationMethods || []).includes("generateContent"))
       .map((m) => m.name.replace(/^models\//, ""));

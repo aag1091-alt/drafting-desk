@@ -3,107 +3,90 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://openrouter.ai https://api.anthropic.com https://api.openai.com https://generativelanguage.googleapis.com http://localhost:* http://127.0.0.1:* https:; form-action 'none'; base-uri 'self'; object-src 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://openrouter.ai https://api.anthropic.com https://api.openai.com https://generativelanguage.googleapis.com http://localhost:* http://127.0.0.1:*; form-action 'none'; base-uri 'self'; object-src 'none'">
 <meta name="referrer" content="strict-origin-when-cross-origin">
-<meta name="description" content="A writing desk for blog posts you write yourself. Keep notes and research beside your draft; get help with grammar, clarity and what to say next from the model you choose. Runs entirely in your browser.">
+<meta name="description" content="A desk for writing blog posts yourself. Paste rough notes, write in your own voice, get quiet help from the model you choose. Runs entirely in your browser.">
 <title>Drafting Desk</title>
 <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="assets/app.css?v=__V__">
-<script type="module" src="js/app.js?v=__V__"></script>
+<link rel="stylesheet" href="assets/style.css">
+<script type="module" src="js/app.js"></script>
 </head>
 <body>
 <div id="app"></div>
 
 <!-- Settings -->
 <dialog id="settingsDlg" aria-labelledby="settingsTitle">
-  <form method="dialog" class="dlg">
-    <header class="dlg-head"><h2 id="settingsTitle">Model</h2><button class="icon-btn" value="close" aria-label="Close">×</button></header>
-    <p class="hint">The assistant is optional: you can write, keep notes and export without it. Calls go straight from this browser to the provider; keys stay in this browser.</p>
-    <fieldset class="providers" id="providerList"><legend class="sr-only">Provider</legend></fieldset>
-    <p class="hint" id="costNote"></p>
-    <div id="providerConfig" class="stack"></div>
-    <label class="check"><input type="checkbox" id="rememberKeys"> Remember keys on this device (otherwise they're forgotten when you close the tab)</label>
-    <div class="row between">
-      <button type="button" class="ghost danger" id="forgetKeys">Forget all keys</button>
-      <div class="row"><button type="button" class="ghost" id="testBtn">Test</button><button class="primary" value="close">Done</button></div>
+  <div class="dlg">
+    <header class="dlg-head"><h2 id="settingsTitle">Settings</h2><button class="icon-btn" data-close aria-label="Close">×</button></header>
+    <div class="dlg-body stack">
+      <section>
+        <h3>Model</h3>
+        <p class="hint">Optional. Writing, notes, history and Finish all work without a model. When you use one, calls go straight from this browser to the provider; keys stay in this browser.</p>
+        <div id="providerConfig" class="stack"></div>
+        <label class="check"><input type="checkbox" id="rememberKeys"> Remember keys on this device <span class="hint">(off = forgotten when the tab closes)</span></label>
+        <div class="row">
+          <button type="button" class="ghost danger" id="forgetKeys">Forget all keys</button>
+          <button type="button" class="ghost" id="testBtn">Test connection</button>
+          <span class="status" id="testStatus" aria-live="polite"></span>
+        </div>
+      </section>
+      <section>
+        <h3>Your voice</h3>
+        <p class="hint">A few bullet points describing how you write. Suggestions for clearer wording follow it.</p>
+        <textarea id="voiceText" rows="7" aria-label="Voice guide"></textarea>
+      </section>
+      <section>
+        <h3>Publishing</h3>
+        <label class="field"><span>Extra front matter <em>(one YAML line each; {{slug}}, {{date}}, {{title}} are filled in)</em></span>
+        <textarea id="extraFm" rows="3" spellcheck="false" placeholder="permalink: /post/{{slug}}/"></textarea></label>
+      </section>
+      <section>
+        <h3>Your data</h3>
+        <div class="row">
+          <button type="button" class="ghost" id="backupBtn">Back up all posts (JSON)</button>
+          <button type="button" class="ghost" id="importBtn">Import…</button>
+        </div>
+        <p class="hint">Posts live only in this browser (localStorage). Back up before clearing site data.</p>
+      </section>
     </div>
-    <p class="status" id="testStatus" aria-live="polite"></p>
-  </form>
-</dialog>
-
-<!-- Voice -->
-<dialog id="voiceDlg" aria-labelledby="voiceTitle">
-  <form method="dialog" class="dlg wide">
-    <header class="dlg-head"><h2 id="voiceTitle">Your voice</h2><button class="icon-btn" value="close" aria-label="Close">×</button></header>
-    <p class="hint">Describe how you write, as a few bullet points. It's used when the assistant suggests clearer wordings, so the options sound like you. Or use "Learn from my writing" below.</p>
-    <textarea id="voiceText" rows="10" autofocus aria-label="Voice guide"></textarea>
-    <details id="learnBox">
-      <summary>Learn from my writing</summary>
-      <p class="hint">Paste two or three things you've written. The model drafts a guide from them; the samples aren't stored.</p>
-      <textarea id="voiceSamples" rows="8" aria-label="Writing samples" placeholder="Paste your writing here…"></textarea>
-      <div class="row"><button type="button" class="ghost" id="learnBtn">Draft guide from samples</button><span class="status" id="learnStatus"></span></div>
-    </details>
-    <div class="row between">
-      <button type="button" class="ghost" id="voiceDefault">Use for new posts too</button>
-      <button class="primary" value="close">Done</button>
-    </div>
-  </form>
-</dialog>
-
-<!-- New post -->
-<dialog id="newDlg" aria-labelledby="newTitle">
-  <form method="dialog" class="dlg" id="newForm">
-    <header class="dlg-head"><h2 id="newTitle">New post</h2><button type="button" class="icon-btn" id="newClose" aria-label="Close">×</button></header>
-    <label class="field"><span>Working title</span><input id="newPostTitle" autofocus required placeholder="What I learned building…" autocomplete="off"></label>
-    <label class="field"><span>The idea, in a sentence or two <em>(optional; saved as your first note)</em></span><textarea id="newPostIdea" rows="3" placeholder="What do you want readers to walk away with?"></textarea></label>
-    <div class="row end"><button class="primary" id="newCreate">Create</button></div>
-  </form>
-</dialog>
-
-<!-- Export -->
-<dialog id="exportDlg" aria-labelledby="exportTitle">
-  <div class="dlg wide dlg-scroll">
-    <header class="dlg-head"><h2 id="exportTitle">Preview and export</h2><button class="icon-btn" id="exportClose" aria-label="Close">×</button></header>
-    <div class="dlg-body">
-      <details class="export-meta" id="postDetails">
-        <summary><strong>Post details</strong> <span class="hint" id="detailsSummary"></span></summary>
-        <label class="field"><span>Description <em>(link previews and search; optional)</em></span>
-          <textarea id="exDesc" rows="2" autofocus placeholder="One sentence on what readers get from this post"></textarea>
-          <span class="row between"><span class="hint" id="exDescCount"></span><button type="button" class="ghost small" id="exDescSuggest">Suggest from my draft</button></span></label>
-        <label class="field"><span>Tags <em>(comma-separated; optional)</em></span><input id="exTags" placeholder="ai, networking, side projects" autocomplete="off"></label>
-        <details class="field"><summary>More front matter <em>(saved for all your posts)</em></summary>
-          <textarea id="exExtra" rows="3" placeholder="categories: [engineering]&#10;image: /assets/{{slug}}.png&#10;permalink: /post/{{slug}}/" spellcheck="false"></textarea>
-          <span class="hint">One YAML line each. {{slug}}, {{date}} and {{title}} are filled in for each post.</span></details>
-      </details>
-      <section class="checks" id="exportChecks" aria-label="Before you publish"></section>
-      <article class="reading" id="exportBody"></article>
-    </div>
-    <footer class="dlg-foot row between">
-      <label class="check"><input type="checkbox" id="frontMatter" checked> Jekyll front matter</label>
-      <div class="row"><button class="ghost" id="markPublished" hidden>Mark as Published</button><span class="row" id="folderRow"></span><button class="ghost" id="copyMd">Copy Markdown</button><button class="primary" id="downloadMd">Download .md</button></div>
-    </footer>
   </div>
 </dialog>
 
-<!-- Versions -->
-<dialog id="versionsDlg" aria-labelledby="versionsTitle">
-  <div class="dlg wide">
-    <header class="dlg-head"><h2 id="versionsTitle">Versions</h2><button class="icon-btn" id="versionsClose" aria-label="Close">×</button></header>
-    <div class="row nowrap"><input id="versionLabel" autofocus placeholder="Label for this version (optional)" aria-label="Version label"><button class="primary" id="saveVersion">Save current</button></div>
-    <p class="hint">Versions are also saved automatically when you open a post, before you delete a big chunk, every 20 minutes of writing, and before any restore.</p>
+<!-- History -->
+<dialog id="historyDlg" aria-labelledby="historyTitle">
+  <div class="dlg">
+    <header class="dlg-head"><h2 id="historyTitle">History</h2><button class="icon-btn" data-close aria-label="Close">×</button></header>
+    <div class="row nowrap">
+      <input id="snapshotLabel" placeholder="Label for this snapshot (optional)" aria-label="Snapshot label">
+      <button type="button" class="primary" id="saveSnapshot">Save snapshot</button>
+    </div>
+    <p class="hint">A snapshot is also saved automatically when you open a post with text in it. Restoring first saves your current draft as a snapshot too.</p>
     <ul class="versions" id="versionList"></ul>
   </div>
 </dialog>
 
-<!-- Confirm -->
-<dialog id="confirmDlg">
-  <form method="dialog" class="dlg narrow">
-    <p id="confirmText"></p>
-    <div class="row end"><button class="ghost" value="no">Cancel</button><button class="primary danger-fill" value="yes" id="confirmYes">Delete</button></div>
-  </form>
+<!-- Finish -->
+<dialog id="finishDlg" aria-labelledby="finishTitle">
+  <div class="dlg wide">
+    <header class="dlg-head"><h2 id="finishTitle">Finish this post</h2><button class="icon-btn" data-close aria-label="Close">×</button></header>
+    <div class="dlg-body stack">
+      <section class="checks" id="finishChecks" aria-label="Ready checks"></section>
+      <label class="field"><span>Title</span>
+        <span class="row nowrap"><input id="finTitle" class="grow"><button type="button" class="ghost small" id="finTitleSuggest">Suggest</button></span></label>
+      <label class="field"><span>Description <em>(link previews and search)</em></span>
+        <span class="row nowrap"><input id="finDesc" class="grow" placeholder="One sentence on what readers get"><button type="button" class="ghost small" id="finDescSuggest">Suggest</button></span>
+        <span class="hint" id="finDescCount"></span></label>
+      <label class="field"><span>Tags <em>(comma-separated)</em></span><input id="finTags" placeholder="ai, networking, side projects"></label>
+      <article class="reading" id="finishPreview" aria-label="Preview"></article>
+    </div>
+    <footer class="dlg-foot row between">
+      <span class="status" id="finishStatus" aria-live="polite"></span>
+      <span class="row"><button type="button" class="ghost" id="copyMd">Copy Markdown</button><button type="button" class="primary" id="downloadMd">Download .md</button></span>
+    </footer>
+  </div>
 </dialog>
 
-<input type="file" id="importFile" accept="application/json,.json,.md,.markdown,.txt,text/markdown,text/plain" multiple hidden>
-<div id="toast" role="status" aria-live="polite"><span id="toastText"></span><button id="toastAction" class="toast-btn" hidden></button></div>
+<input type="file" id="importFile" accept="application/json,.json,.md,.markdown,.txt" multiple hidden>
+<div id="toast" role="status" aria-live="polite"></div>
 </body>
 </html>
